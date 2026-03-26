@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package buddies_network;
+
+service PipelineRouter {
+  rpc AssignConfiguration (SplitConfig) returns (ConfigAck);
+  
+  rpc ExecutePipelineStage (ForwardPayload) returns (BackwardPayload);
+}
+
+message SplitConfig {
+  int32 start_layer_idx = 1;
+  int32 end_layer_idx = 2;
+  bool is_tail_node = 3;
+}
+
+message ConfigAck {
+  bool is_ready = 1;
+}
+
+message ForwardPayload {
+  repeated int64 activation_shape = 1;
+  bytes activation_bytes = 2;
+  
+  repeated int64 target_shape = 3;
+  bytes target_bytes = 4;
+}
+
+message BackwardPayload {
+  repeated int64 gradient_shape = 1;
+  bytes gradient_bytes = 2;
+  float loss_value = 3;
+}
