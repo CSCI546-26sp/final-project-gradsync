@@ -26,9 +26,9 @@ class MultiLayerTrans(nn.Module):
 
 def main():
     parser = argparse.ArgumentParser(description="Test the Distributed ML Pipeline Data Path")
-    parser.add_argument('--role', type=str, required=True, choices=['head', 'tail'], help="Role of this node")
+    parser.add_argument('--role', type=str, required=True, choices=['head', 'middle', 'tail'], help="Role of this node")
     parser.add_argument('--target_ip', type=str, default='127.0.0.1', help="IP of the Tail node (used by Head)")
-    parser.add_argument('--port', type=int, default=50051, help="Port for gRPC communication")
+    parser.add_argument('--port', type=int, default=12345, help="Port for gRPC communication")
     args = parser.parse_args()
 
     print(f"--- Booting as {args.role.upper()} NODE ---")
@@ -45,7 +45,7 @@ def main():
     )
 
     # 4. Diverged Execution based on role
-    if args.role == 'tail':
+    if args.role in ['tail', 'middle']:
         # The Tail node gets trapped here, spinning up the gRPC server to listen for tensors
         print(f"Initialization complete. Serving pipeline slice on port {args.port}...")
         pipeline.serve_forever()

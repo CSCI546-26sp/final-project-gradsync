@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from .runner import HeadNodeRunner, TailNodeRunner
+from .runner import HeadNodeRunner, TailNodeRunner, MiddleNodeRunner
 from .utils import detect_device
 
 
@@ -9,7 +9,7 @@ class DistributedPipeline(nn.Module):
     The drop-in wrapper for Cross-OS distributed training.
     """
 
-    def __init__(self, model: nn.Module, role: str, target_ip: str = "127.0.0.1", port: int = 50051):
+    def __init__(self, model: nn.Module, role: str, target_ip: str = "127.0.0.1", port: int = 12345):
         super().__init__()
         self.role = role.lower()
 
@@ -25,6 +25,8 @@ class DistributedPipeline(nn.Module):
             self.runner = HeadNodeRunner(
                 self.layout[0], target_ip, port, self.device)
             self._configure_remote()
+        elif self.role == 'middle':
+            self.runner = MiddleNodeRunner(self.layout[1], target_ip, port, self.device)
         else:
             raise ValueError("Role must be 'head' or 'tail'.")
 
@@ -35,13 +37,16 @@ class DistributedPipeline(nn.Module):
         split_idx = max(1, len(layers) // 2)
 
         head_slice = layers[:split_idx]
-        tail_slice = layers[split_idx:]
+        ### middle slice
+        middle_slice = layers[split_idx:split_idx+1]
+
+        tail_slice = layers[split_idx+1:]
 
         # --- NEW: Append the final output projection to the Tail node ---
         if hasattr(model, 'output_layer'):
             tail_slice.append(model.output_layer)
 
-        return [head_slice, tail_slice]
+        return [head_slice, middle_slice, tail_slice]
 
     def _configure_remote(self):
         """Head node tells the tail node which layers it owns."""

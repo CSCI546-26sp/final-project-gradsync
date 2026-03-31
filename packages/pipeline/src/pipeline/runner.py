@@ -55,15 +55,14 @@ class TailNodeRunner:
 
         return grad_bytes, grad_shape, loss.item()
 
-    def serve(self, port=50051):
+    def serve(self, port=12345):
         print(f"Tail Node Engine ready. Listening on port {port} (Device: {self.device})...")
         # Start the dumb comms server and pass it our PyTorch callback
         serve_pipeline(processing_callback=self._process_batch_callback, port=port)
 
-
 class HeadNodeRunner:
     """Handles the initial forward pass and acts as the gRPC client."""
-    def __init__(self, model_slice_layers, target_ip, port=50051, device=None, lr=0.01):
+    def __init__(self, model_slice_layers, target_ip, port=12345, device=None, lr=0.01):
         self.device = device or torch.device("cpu")
         self.model_slice = BuddyNode(model_slice_layers).to(self.device)
         self.optimizer = torch.optim.Adam(self.model_slice.parameters(), lr=lr)
@@ -109,3 +108,42 @@ class HeadNodeRunner:
         self.optimizer.step()
 
         return loss_val
+    
+class MiddleNodeRunner:
+    def __init__(self, model_slice_layers, target_ip, port, device, lr=0.01):
+        self.device = device
+        self.model_slice = BuddyNode(model_slice_layers).to(self.device)
+        self.optimizer = torch.optim.Adam(self.model_slice.parameters(), lr=lr)
+        
+        # Middle node is a hybrid: it needs a client to talk to the NEXT node
+        self.client = PipelineClient(target_ip=target_ip, port=port)
+
+    def _process_batch_callback(self, act_bytes, act_shape, tgt_bytes, tgt_shape):
+        # 1. Unpack what we got from the PREVIOUS node
+        activations = unpack_tensor(act_bytes, act_shape, self.device)
+        activations.requires_grad_(True)
+        
+        # 2. Local Forward Pass
+        local_output = self.model_slice(activations)
+        
+        # 3. Relay to the NEXT node (The "Ping")
+        next_act_bytes, next_act_shape = pack_tensor(local_output)
+        grad_bytes, grad_shape, loss_val = self.client.send_forward_receive_backward(
+            next_act_bytes, next_act_shape, tgt_bytes, tgt_shape
+        )
+        
+        # 4. Unpack returned gradients from the NEXT node
+        remote_grads = unpack_tensor(grad_bytes, grad_shape, self.device)
+        
+        # 5. Local Backward Pass
+        self.optimizer.zero_grad()
+        local_output.backward(remote_grads)
+        self.optimizer.step()
+        
+        # 6. Send our gradients back to the PREVIOUS node (The "Pong")
+        my_grad_bytes, my_grad_shape = pack_tensor(activations.grad)
+        return my_grad_bytes, my_grad_shape, loss_val
+
+    def serve(self, port=12345):
+        # Starts listening for the node behind it
+        serve_pipeline(processing_callback=self._process_batch_callback, port=port)
