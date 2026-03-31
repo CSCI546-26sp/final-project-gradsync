@@ -59,8 +59,8 @@ class DistributedPipeline(nn.Module):
 
     def serve_forever(self):
         """Called by the Tail node to start listening for network tensors."""
-        if self.role != 'tail':
-            raise RuntimeError("Only the 'tail' node can serve.")
+        # if self.role != 'tail':
+        #     raise RuntimeError("Only the 'tail' node can serve.")
         self.runner.serve()
 
     def train_step(self, inputs, targets):
