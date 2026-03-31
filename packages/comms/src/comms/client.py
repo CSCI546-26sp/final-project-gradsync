@@ -4,7 +4,7 @@ from .proto import tensor_service_pb2_grpc
 
 
 class PipelineClient:
-    def __init__(self, target_ip="localhost", port=50051):
+    def __init__(self, target_ip="localhost", port=12345):
         options = [
             ('grpc.max_send_message_length', 100 * 1024 * 1024),
             ('grpc.max_receive_message_length', 100 * 1024 * 1024)

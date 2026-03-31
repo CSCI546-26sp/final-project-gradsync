@@ -48,7 +48,7 @@ class PipelineServer(tensor_service_pb2_grpc.PipelineRouterServicer):
         )
 
 
-def serve_pipeline(processing_callback, port=50051):
+def serve_pipeline(processing_callback, port=12345):
     """Starts the blocking gRPC server."""
     options = [
         ('grpc.max_receive_message_length', 100 * 1024 * 1024),
