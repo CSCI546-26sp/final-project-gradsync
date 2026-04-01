@@ -442,6 +442,16 @@ source = { editable = "packages/optimizer" }
 name = "orchestrator"
 version = "0.1.0"
 source = { editable = "packages/orchestrator" }
+dependencies = [
+    { name = "grpcio" },
+    { name = "grpcio-tools" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "grpcio", specifier = ">=1.60.0" },
+    { name = "grpcio-tools", specifier = ">=1.60.0" },
+]
 
 [[package]]
 name = "pillow"
