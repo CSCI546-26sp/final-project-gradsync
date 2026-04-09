@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package cluster;
+
+service ClusterCoordinator {
+  // Raft leader election: candidate requests a vote from a peer
+  rpc RequestVote (VoteRequest) returns (VoteResponse);
+
+  // Elected coordinator broadcasts final role assignments to all peers
+  rpc BroadcastTopology (TopologyConfig) returns (Ack);
+}
+
+message VoteRequest {
+  int64  term         = 1;  // candidate's current election term
+  string candidate_ip = 2;  // who is requesting the vote
+}
+
+message VoteResponse {
+  int64 term         = 1;  // voter's current term (so candidate can update itself)
+  bool  vote_granted = 2;
+}
+
+message Ack {
+  bool ok = 1;
+}
+
+message TopologyConfig {
+  string coordinator_ip = 1;
+  // Ordered list of all node IPs: index 0 = HEAD (coordinator), rest = TAIL
+  repeated string ordered_node_ips = 2;
+}
