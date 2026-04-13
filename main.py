@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 # Import your newly refactored library
-from pipeline import DistributedPipeline
+from pipeline.core import DistributedPipeline
 
 # 1. Define a standard, unmodified PyTorch Model
 class MultiLayerTrans(nn.Module):
@@ -26,12 +26,14 @@ class MultiLayerTrans(nn.Module):
 
 def main():
     parser = argparse.ArgumentParser(description="Test the Distributed ML Pipeline Data Path")
-    parser.add_argument('--role', type=str, required=True, choices=['head', 'tail'], help="Role of this node")
-    parser.add_argument('--target_ip', type=str, default='127.0.0.1', help="IP of the Tail node (used by Head)")
+    parser.add_argument('--my_ip', required=True, help="IP of this machine")
+    parser.add_argument('--peers', nargs='+', required=True, help="IPs of all other machines")
+    # parser.add_argument('--role', type=str, required=True, choices=['head', 'tail'], help="Role of this node")
+    # parser.add_argument('--target_ip', type=str, default='127.0.0.1', help="IP of the Tail node (used by Head)")
     parser.add_argument('--port', type=int, default=50051, help="Port for gRPC communication")
     args = parser.parse_args()
 
-    print(f"--- Booting as {args.role.upper()} NODE ---")
+    print(f"--- Booting node {args.my_ip} ---")
 
     # 2. Instantiate the model
     model = MultiLayerTrans(num_layers=4)
@@ -39,20 +41,22 @@ def main():
     # 3. Wrap it in your library's pipeline
     pipeline = DistributedPipeline(
         model=model,
-        role=args.role,
-        target_ip=args.target_ip,
+        host_ip=args.my_ip,
+        peer_ips=args.peers,
         port=args.port
     )
 
+    pipeline.join_cluster()
+
     # 4. Diverged Execution based on role
-    if args.role == 'tail':
+    if pipeline.role == 'tail':
         # The Tail node gets trapped here, spinning up the gRPC server to listen for tensors
-        print(f"Initialization complete. Serving pipeline slice on port {args.port}...")
+        print(f"Initialization complete. Serving pipeline slice on port {pipeline.port}...")
         pipeline.serve_forever()
 
-    elif args.role == 'head':
+    elif pipeline.role == 'head':
         # The Head node drives the actual training loop
-        print(f"Connecting to Tail node at {args.target_ip}:{args.port}...")
+        print(f"Connecting to downstream node on port {pipeline.port}...")
         
         # Generate dummy data (Batch Size: 8, Seq Len: 32, Dim: 1024)
         print("Generating dummy dataset...")
