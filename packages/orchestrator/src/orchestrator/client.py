@@ -27,13 +27,14 @@ class ClusterClient:
             # If the node is unreachable or offline, default to denying vote
             return False, 0
 
-    def broadcast_topology(self, coordinator_ip: str, ordered_node_ips: list) -> bool:
+    def broadcast_topology(self, coordinator_ip: str, ordered_node_ips: list, term: int) -> bool:
         """
         Sends BroadcastTopology gRPC to the target peer.
         """
         topology = cluster_service_pb2.TopologyConfig(
             coordinator_ip=coordinator_ip,
-            ordered_node_ips=ordered_node_ips
+            ordered_node_ips=ordered_node_ips,
+            term=term
         )
         try:
             # 1.0s timeout for topology dissemination

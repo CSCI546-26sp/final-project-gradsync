@@ -28,4 +28,5 @@ message TopologyConfig {
   string coordinator_ip = 1;
   // Ordered list of all node IPs: index 0 = HEAD (coordinator), rest = TAIL
   repeated string ordered_node_ips = 2;
+  int64 term = 3; // The term of the leader broadcasting this topology
 }
