@@ -193,3 +193,43 @@ class TestBroadcastTopology:
 
         called_ips = {c.kwargs.get("target_ip") or c.args[0] for c in MockClient.call_args_list}
         assert called_ips == {"10.0.0.2", "10.0.0.3"}
+
+
+# ---------------------------------------------------------------------------
+# _create_topology_config
+# ---------------------------------------------------------------------------
+
+class TestCreateTopologyConfig:
+    """Unit tests for the topological graph evaluation static helper."""
+    
+    def test_head_element(self):
+        ordered_ips = ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"]
+        topo = ClusterNode._create_topology_config("10.0.0.1", "10.0.0.1", ordered_ips, 1)
+        
+        assert topo.node_index == 0
+        assert topo.prev_node_ip == ""
+        assert topo.next_node_ip == "10.0.0.2"
+
+    def test_middle_element(self):
+        ordered_ips = ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"]
+        topo = ClusterNode._create_topology_config("10.0.0.2", "10.0.0.1", ordered_ips, 1)
+        
+        assert topo.node_index == 1
+        assert topo.prev_node_ip == "10.0.0.1"
+        assert topo.next_node_ip == "10.0.0.3"
+
+    def test_tail_element(self):
+        ordered_ips = ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"]
+        topo = ClusterNode._create_topology_config("10.0.0.4", "10.0.0.1", ordered_ips, 1)
+        
+        assert topo.node_index == 3
+        assert topo.prev_node_ip == "10.0.0.3"
+        assert topo.next_node_ip == ""
+
+    def test_missing_element_fallback(self):
+        ordered_ips = ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"]
+        topo = ClusterNode._create_topology_config("10.0.0.9", "10.0.0.1", ordered_ips, 1)
+        
+        assert topo.node_index == -1
+        assert topo.prev_node_ip == ""
+        assert topo.next_node_ip == ""
