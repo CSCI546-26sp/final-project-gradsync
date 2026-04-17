@@ -12,6 +12,10 @@ class ClusterServer(cluster_service_pb2_grpc.ClusterCoordinatorServicer):
     def __init__(self, node):
         self.node = node
 
+    def Ping(self, request, context):
+        """Simplest handler. Just proves the gRPC listener is running."""
+        return cluster_service_pb2.Ack(ok=True)
+
     def RequestVote(self, request, context):
         with self.node._election_cv:
             # If we already finalized the cluster topology, the election is permanently over.
@@ -70,13 +74,3 @@ class ClusterServer(cluster_service_pb2_grpc.ClusterCoordinatorServicer):
         return cluster_service_pb2.Ack(ok=True)
 
 
-def serve_cluster(node, port=50051):
-    """Starts the background gRPC server for the Raft node."""
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    cluster_service_pb2_grpc.add_ClusterCoordinatorServicer_to_server(
-        ClusterServer(node), server
-    )
-    server.add_insecure_port(f'{node.host_ip}:{port}')
-    print(f"[{node.host_ip}] Raft Server listening on {node.host_ip}:{port}...")
-    server.start()
-    return server

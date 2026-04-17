@@ -43,6 +43,15 @@ class ClusterClient:
         except grpc.RpcError:
             return False
 
+    def ping(self) -> bool:
+        """Sends Ping RPC to verify node is online."""
+        try:
+            request = cluster_service_pb2.PingRequest()
+            response = self.stub.Ping(request, timeout=0.5)
+            return response.ok
+        except grpc.RpcError:
+            return False
+
     def close(self):
         """Cleanly shut down the gRPC channel."""
         self.channel.close()

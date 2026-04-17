@@ -8,7 +8,12 @@ service ClusterCoordinator {
 
   // Elected coordinator broadcasts final role assignments to all peers
   rpc BroadcastTopology (TopologyConfig) returns (Ack);
+
+  // Synchronization barrier to verify all hosts are online before election
+  rpc Ping (PingRequest) returns (Ack);
 }
+
+message PingRequest {}
 
 message VoteRequest {
   int64  term         = 1;  // candidate's current election term

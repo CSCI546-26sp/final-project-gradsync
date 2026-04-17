@@ -12,6 +12,7 @@ Prerequisites:
 """
 
 import threading
+import time
 from typing import Optional
 
 import pytest
@@ -53,23 +54,28 @@ class RaftCluster:
         self._threads: list[threading.Thread] = []
         self._exceptions: dict[str, Exception] = {}
 
-    def begin(self):
+    def begin(self, stagger_delays: dict[str, float] = None):
         """
         Start all nodes concurrently. Each node runs join_cluster() in a
         daemon thread so the test process can exit even if a node hangs.
+        If `stagger_delays` dictionary exists, delays execution by the mapped float seconds.
         """
+        stagger_delays = stagger_delays or {}
         for node in self.nodes:
+            delay = stagger_delays.get(node.host_ip, 0.0)
             t = threading.Thread(
                 target=self._run_node,
-                args=(node,),
+                args=(node, delay),
                 daemon=True,
                 name=f"raft-{node.host_ip}",
             )
             self._threads.append(t)
             t.start()
 
-    def _run_node(self, node: ClusterNode):
+    def _run_node(self, node: ClusterNode, delay: float):
         try:
+            if delay > 0.0:
+                time.sleep(delay)
             node.join_cluster()
         except Exception as e:
             self._exceptions[node.host_ip] = e
@@ -83,16 +89,16 @@ class RaftCluster:
             for t in self._threads:
                 t.join(timeout=timeout)
     
+            if self._exceptions:
+                pytest.fail(f"Nodes raised exceptions during join_cluster(): "
+                            f"{self._exceptions}")
+
             still_running = [t.name for t in self._threads if t.is_alive()]
             if still_running:
                 pytest.fail(
                     f"Nodes did not complete join_cluster() within {timeout}s: "
                     f"{still_running}"
                 )
-    
-            if self._exceptions:
-                pytest.fail(f"Nodes raised exceptions during join_cluster(): "
-                            f"{self._exceptions}")
         finally:
             # Shutdown all nodes now that tests have completed their primary wait
             for node in self.nodes:
@@ -253,6 +259,32 @@ def test_all_nodes_agree_on_term():
 
     term = cluster.check_terms()
     assert term >= 1, f"Term should be at least 1 after an election, got {term}"
+
+
+@pytest.mark.timeout(15)
+def test_three_node_cluster_staggered_start():
+    """
+    Tests the pre-Raft sync barrier. Nodes start separated by delays (e.g. 1-2 seconds apart).
+    The first node MUST block and wait for the last node to start instead of
+    immediately timing out and failing to form a complete network.
+    """
+    nodes = RaftCluster.gen_local_instances(3)
+    cluster = RaftCluster(nodes)
+    
+    # Stagger nodes by 0, 1, and 2 seconds respectively.
+    delays = {
+        "127.0.0.1": 0.0,
+        "127.0.0.2": 5.0,
+        "127.0.0.3": 10.0
+    }
+    cluster.begin(stagger_delays=delays)
+    
+    # Needs a bigger timeout (5s normal + 2s max stagger delay + margin)
+    cluster.wait(timeout=20.0)
+    
+    cluster.check_one_leader()
+    cluster.check_all_agree()
+    cluster.check_terms()
 
 
 @pytest.mark.timeout(15)

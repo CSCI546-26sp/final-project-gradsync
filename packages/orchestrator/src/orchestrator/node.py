@@ -2,11 +2,12 @@ import random
 import threading
 import time
 from enum import Enum, auto
+import grpc
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .client import ClusterClient
-from .server import serve_cluster
-from .proto import cluster_service_pb2
+from .server import ClusterServer
+from .proto import cluster_service_pb2, cluster_service_pb2_grpc
 
 
 class NodeState(Enum):
@@ -26,15 +27,31 @@ class ClusterNode:
         self.votes_received = 0
         self.coordinator_ip = None
         self.topology_config = None
+        self.server = None
         self._election_cv = threading.Condition()  # used to sleep until timeout (or future heartbeat)
+
+    def _serve_cluster(self):
+        """Starts the background gRPC server for the Raft node."""
+        server = grpc.server(ThreadPoolExecutor(max_workers=10))
+        cluster_service_pb2_grpc.add_ClusterCoordinatorServicer_to_server(
+            ClusterServer(self), server
+        )
+        server.add_insecure_port(f'{self.host_ip}:{self.port}')
+        print(f"[{self.host_ip}] Raft Server listening on {self.host_ip}:{self.port}...")
+        server.start()
+        return server
 
     def join_cluster(self):
         """
-        Blocking call. Runs Raft leader election and returns a TopologyConfig
-        once all nodes have agreed on a coordinator.
+        Main orchestrator lifecycle. Blocks until the cluster agrees on a single
+        coordinator (LEADER) and a finalized network topology.
+        Returns the finalized topology (TopologyConfig).
         """
         # Start the background gRPC server to receive votes and topology
-        self.server = serve_cluster(self, self.port)
+        self.server = self._serve_cluster()
+        
+        # Halt execution and wait for all pipeline peers to come online completely
+        self.wait_for_peers()
 
         while self.topology_config is None:
             # Randomized election timeout: 300–450 ms
@@ -118,6 +135,32 @@ class ClusterNode:
         """Cleanly stop the gRPC server."""
         if self.server:
             self.server.stop(grace=None)
+
+    def wait_for_peers(self):
+        """Blocks indefinitely until all peer IPs return a successful gRPC Ping."""
+        if not self.peer_ips:
+            return
+
+        print(f"[{self.host_ip}] Waiting for peers to come online: {self.peer_ips}")
+        pending = set(self.peer_ips)
+        
+        while pending:
+            # We iterate over a copy (list) so we can safely remove from the original set
+            for peer in list(pending):
+                client = ClusterClient(target_ip=peer, port=self.port)
+                try:
+                    if client.ping():
+                        print(f"[{self.host_ip}] Peer {peer} is ONLINE!")
+                        pending.remove(peer)
+                    else:
+                        print(f"[{self.host_ip}] Peer {peer} ping returned False.")
+                except Exception as e:
+                    print(f"[{self.host_ip}] Exception pinging {peer}: {e}")
+                finally:
+                    client.close()
+                    
+            if pending:
+                time.sleep(0.5)
 
     def send_request_vote(self, peer_ip: str, term: int, candidate_ip: str) -> bool:
         """Sends RequestVote gRPC to peer_ip."""
