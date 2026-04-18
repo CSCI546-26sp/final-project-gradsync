@@ -60,11 +60,11 @@ def main():
         async def train_loop():
             # Generate dummy data (Batch Size: 8, Seq Len: 32, Dim: 1024)
             print("Generating dummy dataset...")
-            dummy_inputs = torch.randn(10, 8, 32, 1024)
+            dummy_inputs = torch.randn(16, 8, 32, 1024)
             # Create a weak mathematical correlation so the loss actually decreases
             # dummy_targets = dummy_inputs[:, :, :, 0].mean(dim=-1, keepdim=True) + torch.randn(10, 8, 32, 1) * 0.1
             # Use 0:1 to keep the last dimension intact!
-            dummy_targets = dummy_inputs[:, :, :, 0:1] * 0.5 + torch.randn(10, 8, 32, 1) * 0.1
+            dummy_targets = dummy_inputs[:, :, :, 0:1] * 0.5 + torch.randn(16, 8, 32, 1) * 0.1
 
             epochs = 3
 
@@ -91,7 +91,7 @@ def main():
                     batch_loss = sum(micro_losses) / len(micro_losses)
                     epoch_loss += batch_loss
                     
-                    print(f"  Batch {batch_idx + 1}/10 | Loss: {batch_loss:.4f}")
+                    print(f"  Batch {batch_idx + 1}/16 | Loss: {batch_loss:.4f}")
                 
                 end_time = time.time()
                 avg_loss = epoch_loss / len(dummy_inputs)
