@@ -10,12 +10,22 @@ class PipelineClient:
             ('grpc.max_receive_message_length', 100 * 1024 * 1024)
         ]
 
+        self.target = f"{target_ip}:{port}"
+        self.options = options
+
+        self.channel = None
+        self.stub = None
+
+    def _connect(self):
         # Establish the connection to the next node in the sequence
         self.channel = grpc.aio.insecure_channel(
-            f'{target_ip}:{port}', options=options)
+            self.target, options=self.options)
         self.stub = tensor_service_pb2_grpc.PipelineRouterStub(self.channel)
 
+
+
     async def send_pipeline_config(self, start_layer, end_layer, is_tail=True):
+        self._connect()
         request = tensor_service_pb2.SplitConfig(
             start_layer_idx=start_layer,
             end_layer_idx=end_layer,
@@ -31,6 +41,7 @@ class PipelineClient:
 
     async def send_forward_receive_backward(self, act_bytes, act_shape, target_bytes, target_shape):
         """Blocks until the remote server finishes the forward/backward pass and returns gradients."""
+        self._connect()
         request = tensor_service_pb2.ForwardPayload(
             activation_shape=act_shape,
             activation_bytes=act_bytes,
@@ -61,4 +72,5 @@ class PipelineClient:
 
     async def close(self):
         """Cleanly shut down the channel."""
-        self.channel.close()
+        if self.channel is not None:
+            await self.channel.close()
