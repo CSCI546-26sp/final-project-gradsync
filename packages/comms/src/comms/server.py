@@ -64,8 +64,8 @@ async def serve_pipeline_async(processing_callback, port=12345):
 
     server.add_insecure_port(f'[::]:{port}')
     print(f"Pipeline Server listening on port {port}...")
-    server.start()
-    server.wait_for_termination()
+    await server.start()
+    await server.wait_for_termination()
 
 
 def serve_pipeline(processing_callback, port=12345):
