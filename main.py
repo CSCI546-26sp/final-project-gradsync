@@ -7,6 +7,27 @@ from pipeline import DistributedPipeline
 
 import asyncio
 
+import random
+import numpy as np
+
+def set_deterministic_seed(seed=42):
+    """Locks all random number generators across all hardware backends."""
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    
+    # Lock Apple Silicon (Mac Head Node)
+    if torch.backends.mps.is_available():
+        torch.mps.manual_seed(seed)
+        
+    # Lock CUDA (if you ever switch Windows back to GPU)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        
+    # Force deterministic algorithms where possible
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 # 1. Define a standard, unmodified PyTorch Model
 class MultiLayerTrans(nn.Module):
     def __init__(self, num_layers=4, d_model=1024, nhead=8, dim_feedforward=2048):
@@ -36,6 +57,7 @@ def main():
     print(f"--- Booting as {args.role.upper()} NODE ---")
 
     # 2. Instantiate the model
+    set_deterministic_seed(257)
     model = MultiLayerTrans(num_layers=4)
 
     # 3. Wrap it in your library's pipeline
