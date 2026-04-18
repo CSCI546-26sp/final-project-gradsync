@@ -30,6 +30,7 @@ def main():
     parser.add_argument('--role', type=str, required=True, choices=['head', 'middle', 'tail'], help="Role of this node")
     parser.add_argument('--target_ip', type=str, default='127.0.0.1', help="IP of the Tail node (used by Head)")
     parser.add_argument('--port', type=int, default=12345, help="Port for gRPC communication")
+    parser.add_argument("--n_micro", type=int, default=4, help="Number of microbatches for 1f1b")
     args = parser.parse_args()
 
     print(f"--- Booting as {args.role.upper()} NODE ---")
@@ -42,7 +43,8 @@ def main():
         model=model,
         role=args.role,
         target_ip=args.target_ip,
-        port=args.port
+        port=args.port,
+        n_micro=args.n_micro
     )
 
     # 4. Diverged Execution based on role
@@ -66,8 +68,6 @@ def main():
 
             epochs = 3
 
-            num_micro_batches = 4
-
             for epoch in range(epochs):
                 print(f"\n--- Epoch {epoch + 1}/{epochs} ---")
                 epoch_loss = 0.0
@@ -78,16 +78,17 @@ def main():
                     x = dummy_inputs[batch_idx]
                     y = dummy_targets[batch_idx]
 
-                    micro_x = torch.chunk(x, chunks=num_micro_batches, dim=0)
-                    micro_y = torch.chunk(y, chunks=num_micro_batches, dim=0)
+                    micro_x = torch.chunk(x, chunks=args.n_micro, dim=0)
+                    micro_y = torch.chunk(y, chunks=args.n_micro, dim=0)
+
+                    pipeline.zero_grad()
 
                     tasks = [pipeline.train_step(mx, my) for mx, my in zip(micro_x, micro_y)]
-
                     micro_losses = await asyncio.gather(*tasks)
 
+                    pipeline.step()
+
                     batch_loss = sum(micro_losses) / len(micro_losses)
-                    
-                    
                     epoch_loss += batch_loss
                     
                     print(f"  Batch {batch_idx + 1}/10 | Loss: {batch_loss:.4f}")

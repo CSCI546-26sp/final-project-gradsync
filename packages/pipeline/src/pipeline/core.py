@@ -11,7 +11,7 @@ class DistributedPipeline(nn.Module):
     The drop-in wrapper for Cross-OS distributed training.
     """
 
-    def __init__(self, model: nn.Module, role: str, target_ip: str = "127.0.0.1", port: int = 12345):
+    def __init__(self, model: nn.Module, role: str, target_ip: str = "127.0.0.1", port: int = 12345, n_micro = 1):
         super().__init__()
         self.role = role.lower()
 
@@ -21,14 +21,14 @@ class DistributedPipeline(nn.Module):
         # 2. Initialize the correct execution engine
         self.device = detect_device()
         if self.role == 'tail':
-            self.runner = TailNodeRunner(self.layout[1], self.device)
+            self.runner = TailNodeRunner(self.layout[1], self.device, n_micro=n_micro)
 
         elif self.role == 'head':
             self.runner = HeadNodeRunner(
                 self.layout[0], target_ip, port, self.device)
             asyncio.run(self._configure_remote())
         elif self.role == 'middle':
-            self.runner = MiddleNodeRunner(self.layout[1], target_ip, port, self.device)
+            self.runner = MiddleNodeRunner(self.layout[1], target_ip, port, self.device, n_micro=n_micro)
         else:
             raise ValueError("Role must be 'head' or 'tail'.")
 
@@ -76,3 +76,11 @@ class DistributedPipeline(nn.Module):
     def parameters(self, recurse: bool = True):
         """Expose local parameters to the user's optimizer."""
         return self.runner.model_slice.parameters(recurse)
+
+    def zero_grad(self):
+        if self.role == 'head':
+            self.runner.optimizer.zero_grad()
+
+    def step(self):
+        if self.role == 'head':
+            self.runner.optimizer.step()

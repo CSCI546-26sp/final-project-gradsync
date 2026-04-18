@@ -22,19 +22,27 @@ class BuddyNode(nn.Module):
 
 class TailNodeRunner:
     """Handles the backward pass and acts as the gRPC server."""
-    def __init__(self, model_slice_layers, device, lr=0.01):
+    def __init__(self, model_slice_layers, device, lr=0.01, n_micro = 1):
         self.device = device
         self.model_slice = BuddyNode(model_slice_layers).to(self.device)
         self.optimizer = torch.optim.Adam(self.model_slice.parameters(), lr=lr)
         self.criterion = nn.MSELoss()
 
+        self.accum_steps = n_micro
+        self.fw_started = 0
+        self.bw_completed = 0
+
     async def _process_batch_callback(self, act_bytes, act_shape, tgt_bytes, tgt_shape):
         """Translates raw network bytes into PyTorch operations."""
+
+        if self.fw_started % self.accum_steps == 0:
+            self.optimizer.zero_grad()
+        self.fw_started += 1
 
         # 1. Deserialize Bytes -> Tensors (Wrap with bytearray!)
         # activations = torch.frombuffer(bytearray(act_bytes), dtype=torch.float32).reshape(act_shape).clone()
         activations = unpack_tensor(act_bytes, act_shape, self.device)
-        activations = activations.to(self.device)
+        # activations = activations.to(self.device)
         activations.requires_grad_(True)
         
         # targets = torch.frombuffer(bytearray(tgt_bytes), dtype=torch.float32).reshape(tgt_shape).clone()
@@ -43,18 +51,15 @@ class TailNodeRunner:
         targets = unpack_tensor(tgt_bytes, tgt_shape, self.device)
 
         # 2. Local Training Loop
-        self.optimizer.zero_grad()
         outputs = self.model_slice(activations)
         loss = self.criterion(outputs, targets)
         loss.backward()
-        self.optimizer.step()
 
-        # 3. Serialize Gradients -> Bytes
-        # grad_bytes = activations.grad.cpu().numpy().tobytes()
-        # grad_shape = list(activations.grad.shape)
+        self.bw_completed += 1
+        if self.bw_completed % self.accum_steps == 0:
+            self.optimizer.step()
 
         grad_bytes, grad_shape = pack_tensor(activations.grad)
-
         return grad_bytes, grad_shape, loss.item()
 
     def serve(self, port=12345):
@@ -69,7 +74,7 @@ class HeadNodeRunner:
         self.model_slice = BuddyNode(model_slice_layers).to(self.device)
         self.optimizer = torch.optim.Adam(self.model_slice.parameters(), lr=lr)
         
-        # Initialize the dumb comms client
+        # Initialize the comms client
         self.client = PipelineClient(target_ip=target_ip, port=port)
 
     async def configure_remote(self, start_layer, end_layer):
@@ -80,7 +85,7 @@ class HeadNodeRunner:
 
 
         inputs = inputs.to(self.device)
-        self.optimizer.zero_grad()
+        # self.optimizer.zero_grad()
         
         # 1. Local Forward Pass
         local_activations = self.model_slice(inputs)
@@ -107,12 +112,12 @@ class HeadNodeRunner:
 
         # 5. Local Backward Pass
         local_activations.backward(returned_grads)
-        self.optimizer.step()
+        # self.optimizer.step()
 
         return loss_val
     
 class MiddleNodeRunner:
-    def __init__(self, model_slice_layers, target_ip, port, device, lr=0.01):
+    def __init__(self, model_slice_layers, target_ip, port, device, lr=0.01, n_micro = 1):
         self.device = device
         self.model_slice = BuddyNode(model_slice_layers).to(self.device)
         self.optimizer = torch.optim.Adam(self.model_slice.parameters(), lr=lr)
@@ -120,11 +125,18 @@ class MiddleNodeRunner:
         # Middle node is a hybrid: it needs a client to talk to the NEXT node
         self.client = PipelineClient(target_ip=target_ip, port=port)
 
+        self.accum_steps = n_micro
+        self.fw_started = 0
+        self.bw_completed = 0
         self.mb_counter = 0
 
     async def _process_batch_callback(self, act_bytes, act_shape, tgt_bytes, tgt_shape):
         self.mb_counter += 1
         mb_id = self.mb_counter
+
+        if self.fw_started % self.accum_steps == 0:
+            self.optimizer.zero_grad()
+        self.fw_started += 1
 
         print(f"  [MB {mb_id}] FORWARD Started")
 
@@ -150,9 +162,13 @@ class MiddleNodeRunner:
         
 
         # 5. Local Backward Pass
-        self.optimizer.zero_grad()
+        # self.optimizer.zero_grad()
         local_output.backward(remote_grads)
-        self.optimizer.step()
+        
+        self.bw_completed += 1
+        if self.bw_completed % self.accum_steps == 0:
+            self.optimizer.step()
+        
         await asyncio.sleep(0.5) #### REMOVE WHEN TESTING
         print("WAITING HERE CUS DID NOT COMMENT FORCE WAIT")
         print(f"  [MB {mb_id}] BACKWARD Done. Returning gradients to Head.")
