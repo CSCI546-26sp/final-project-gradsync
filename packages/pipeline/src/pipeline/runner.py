@@ -73,7 +73,7 @@ class HeadNodeRunner:
         self.client = PipelineClient(target_ip=target_ip, port=port)
 
     async def configure_remote(self, start_layer, end_layer):
-        return self.client.send_pipeline_config(start_layer, end_layer, is_tail=True)
+        return await self.client.send_pipeline_config(start_layer, end_layer, is_tail=True)
 
     async def train_batch(self, inputs, targets):
         """Executes one distributed forward/backward pass."""
@@ -96,7 +96,7 @@ class HeadNodeRunner:
         tgt_bytes, tgt_shape = pack_tensor(targets)
 
         # 3. Transmit and block for Tail node's response
-        grad_bytes, grad_shape, loss_val = self.client.send_forward_receive_backward(
+        grad_bytes, grad_shape, loss_val = await self.client.send_forward_receive_backward(
             act_bytes, act_shape, tgt_bytes, tgt_shape
         )
 
@@ -140,7 +140,7 @@ class MiddleNodeRunner:
         print(f"  [MB {mb_id}] FORWARD Done. Yielding to network (waiting on Tail...)")
         # 3. Relay to the NEXT node (The "Ping")
         next_act_bytes, next_act_shape = pack_tensor(local_output)
-        grad_bytes, grad_shape, loss_val = self.client.send_forward_receive_backward(
+        grad_bytes, grad_shape, loss_val = await self.client.send_forward_receive_backward(
             next_act_bytes, next_act_shape, tgt_bytes, tgt_shape
         )
         

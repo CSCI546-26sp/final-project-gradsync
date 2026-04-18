@@ -70,7 +70,7 @@ class DistributedPipeline(nn.Module):
         if self.role != 'head':
             raise RuntimeError(
                 "Only the 'head' node can initiate a train_step.")
-        return self.runner.train_batch(inputs, targets)
+        return await self.runner.train_batch(inputs, targets)
 
     def parameters(self, recurse: bool = True):
         """Expose local parameters to the user's optimizer."""
