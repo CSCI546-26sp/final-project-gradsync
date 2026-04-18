@@ -147,8 +147,8 @@ class MiddleNodeRunner:
         # 2. Local Forward Pass
         local_output = self.model_slice(activations)
 
-        await asyncio.sleep(0.5) #### REMOVE WHEN TESTING
-        print("WAITING HERE CUS DID NOT COMMENT FORCE WAIT")
+        # await asyncio.sleep(0.5) #### REMOVE WHEN TESTING
+        # print("WAITING HERE CUS DID NOT COMMENT FORCE WAIT")
         print(f"  [MB {mb_id}] FORWARD Done. Yielding to network (waiting on Tail...)")
         # 3. Relay to the NEXT node (The "Ping")
         next_act_bytes, next_act_shape = pack_tensor(local_output)
@@ -164,13 +164,13 @@ class MiddleNodeRunner:
         # 5. Local Backward Pass
         # self.optimizer.zero_grad()
         local_output.backward(remote_grads)
-        
+
         self.bw_completed += 1
         if self.bw_completed % self.accum_steps == 0:
             self.optimizer.step()
         
-        await asyncio.sleep(0.5) #### REMOVE WHEN TESTING
-        print("WAITING HERE CUS DID NOT COMMENT FORCE WAIT")
+        # await asyncio.sleep(0.5) #### REMOVE WHEN TESTING
+        # print("WAITING HERE CUS DID NOT COMMENT FORCE WAIT")
         print(f"  [MB {mb_id}] BACKWARD Done. Returning gradients to Head.")
         # 6. Send our gradients back to the PREVIOUS node (The "Pong")
         my_grad_bytes, my_grad_shape = pack_tensor(activations.grad)
