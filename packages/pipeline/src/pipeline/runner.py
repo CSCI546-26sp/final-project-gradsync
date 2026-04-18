@@ -53,7 +53,10 @@ class TailNodeRunner:
         # 2. Local Training Loop
         outputs = self.model_slice(activations)
         loss = self.criterion(outputs, targets)
-        loss.backward()
+
+        scaled_loss = loss / self.accum_steps
+
+        scaled_loss.backward()
 
         self.bw_completed += 1
         if self.bw_completed % self.accum_steps == 0:
