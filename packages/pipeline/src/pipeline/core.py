@@ -21,7 +21,7 @@ class DistributedPipeline(nn.Module):
         # 2. Initialize the correct execution engine
         self.device = detect_device()
         if self.role == 'tail':
-            self.runner = TailNodeRunner(self.layout[2], self.device)
+            self.runner = TailNodeRunner(self.layout[1], self.device)
 
         elif self.role == 'head':
             self.runner = HeadNodeRunner(
@@ -48,7 +48,8 @@ class DistributedPipeline(nn.Module):
         if hasattr(model, 'output_layer'):
             tail_slice.append(model.output_layer)
 
-        return [head_slice, middle_slice, tail_slice]
+        #return [head_slice, middle_slice, tail_slice]
+        return [head_slice, tail_slice]
 
     async def _configure_remote(self):
         """Head node tells the tail node which layers it owns."""
