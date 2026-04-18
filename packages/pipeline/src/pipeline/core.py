@@ -40,16 +40,16 @@ class DistributedPipeline(nn.Module):
 
         head_slice = layers[:split_idx]
         ### middle slice
-        # middle_slice = layers[split_idx:split_idx+1]
+        middle_slice = layers[split_idx:split_idx+1]
 
-        tail_slice = layers[split_idx:]
+        tail_slice = layers[split_idx+1:]
 
         # --- NEW: Append the final output projection to the Tail node ---
         if hasattr(model, 'output_layer'):
             tail_slice.append(model.output_layer)
 
-        #return [head_slice, middle_slice, tail_slice]
-        return [head_slice, tail_slice]
+        return [head_slice, middle_slice, tail_slice]
+        # return [head_slice, tail_slice]
 
     async def _configure_remote(self):
         """Head node tells the tail node which layers it owns."""
