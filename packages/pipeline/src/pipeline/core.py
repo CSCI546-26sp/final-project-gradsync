@@ -40,9 +40,9 @@ class DistributedPipeline(nn.Module):
 
         head_slice = layers[:split_idx]
         ### middle slice
-        middle_slice = layers[split_idx:split_idx+1]
+        # middle_slice = layers[split_idx:split_idx+1]
 
-        tail_slice = layers[split_idx+1:]
+        tail_slice = layers[split_idx:]
 
         # --- NEW: Append the final output projection to the Tail node ---
         if hasattr(model, 'output_layer'):
