@@ -3,6 +3,8 @@ import torch.nn as nn
 from .runner import HeadNodeRunner, TailNodeRunner, MiddleNodeRunner
 from .utils import detect_device
 
+import asyncio
+
 
 class DistributedPipeline(nn.Module):
     """
@@ -19,12 +21,12 @@ class DistributedPipeline(nn.Module):
         # 2. Initialize the correct execution engine
         self.device = detect_device()
         if self.role == 'tail':
-            self.runner = TailNodeRunner(self.layout[1], self.device)
+            self.runner = TailNodeRunner(self.layout[2], self.device)
 
         elif self.role == 'head':
             self.runner = HeadNodeRunner(
                 self.layout[0], target_ip, port, self.device)
-            self._configure_remote()
+            asyncio.run(self._configure_remote())
         elif self.role == 'middle':
             self.runner = MiddleNodeRunner(self.layout[1], target_ip, port, self.device)
         else:
@@ -48,7 +50,7 @@ class DistributedPipeline(nn.Module):
 
         return [head_slice, middle_slice, tail_slice]
 
-    def _configure_remote(self):
+    async def _configure_remote(self):
         """Head node tells the tail node which layers it owns."""
         is_ready = self.runner.configure_remote(
             start_layer=len(self.layout[0]),
@@ -63,7 +65,7 @@ class DistributedPipeline(nn.Module):
         #     raise RuntimeError("Only the 'tail' node can serve.")
         self.runner.serve()
 
-    def train_step(self, inputs, targets):
+    async def train_step(self, inputs, targets):
         """Called by the Head node to execute a distributed forward/backward pass."""
         if self.role != 'head':
             raise RuntimeError(

@@ -3,8 +3,9 @@ import time
 import torch
 import torch.nn as nn
 
-# Import your newly refactored library
 from pipeline import DistributedPipeline
+
+import asyncio
 
 # 1. Define a standard, unmodified PyTorch Model
 class MultiLayerTrans(nn.Module):
@@ -54,35 +55,48 @@ def main():
         # The Head node drives the actual training loop
         print(f"Connecting to Tail node at {args.target_ip}:{args.port}...")
         
-        # Generate dummy data (Batch Size: 8, Seq Len: 32, Dim: 1024)
-        print("Generating dummy dataset...")
-        dummy_inputs = torch.randn(10, 8, 32, 1024)
-        # Create a weak mathematical correlation so the loss actually decreases
-        # dummy_targets = dummy_inputs[:, :, :, 0].mean(dim=-1, keepdim=True) + torch.randn(10, 8, 32, 1) * 0.1
-        # Use 0:1 to keep the last dimension intact!
-        dummy_targets = dummy_inputs[:, :, :, 0:1] * 0.5 + torch.randn(10, 8, 32, 1) * 0.1
+        async def train_loop():
+            # Generate dummy data (Batch Size: 8, Seq Len: 32, Dim: 1024)
+            print("Generating dummy dataset...")
+            dummy_inputs = torch.randn(10, 8, 32, 1024)
+            # Create a weak mathematical correlation so the loss actually decreases
+            # dummy_targets = dummy_inputs[:, :, :, 0].mean(dim=-1, keepdim=True) + torch.randn(10, 8, 32, 1) * 0.1
+            # Use 0:1 to keep the last dimension intact!
+            dummy_targets = dummy_inputs[:, :, :, 0:1] * 0.5 + torch.randn(10, 8, 32, 1) * 0.1
 
-        epochs = 3
-        for epoch in range(epochs):
-            print(f"\n--- Epoch {epoch + 1}/{epochs} ---")
-            epoch_loss = 0.0
-            
-            start_time = time.time()
-            
-            for batch_idx in range(len(dummy_inputs)):
-                x = dummy_inputs[batch_idx]
-                y = dummy_targets[batch_idx]
-                
-                # The Magic Trap Door: The network pass and remote execution happen here
-                loss = pipeline.train_step(x, y)
-                epoch_loss += loss
-                
-                print(f"  Batch {batch_idx + 1}/10 | Loss: {loss:.4f}")
-            
-            end_time = time.time()
-            avg_loss = epoch_loss / len(dummy_inputs)
-            print(f"Epoch {epoch + 1} Avg Loss: {avg_loss:.4f} | Time: {end_time - start_time:.2f}s")
+            epochs = 3
 
+            num_micro_batches = 4
+
+            for epoch in range(epochs):
+                print(f"\n--- Epoch {epoch + 1}/{epochs} ---")
+                epoch_loss = 0.0
+                
+                start_time = time.time()
+                
+                for batch_idx in range(len(dummy_inputs)):
+                    x = dummy_inputs[batch_idx]
+                    y = dummy_targets[batch_idx]
+
+                    micro_x = torch.chunk(x, chunks=num_micro_batches, dim=0)
+                    micro_y = torch.chunk(y, chunks=num_micro_batches, dim=0)
+
+                    tasks = [pipeline.train_step(mx, my) for mx, my in zip(micro_x, micro_y)]
+
+                    micro_losses = await asyncio.gather(*tasks)
+
+                    batch_loss = sum(micro_losses) / len(micro_losses)
+                    
+                    
+                    epoch_loss += batch_loss
+                    
+                    print(f"  Batch {batch_idx + 1}/10 | Loss: {batch_loss:.4f}")
+                
+                end_time = time.time()
+                avg_loss = epoch_loss / len(dummy_inputs)
+                print(f"Epoch {epoch + 1} Avg Loss: {avg_loss:.4f} | Time: {end_time - start_time:.2f}s")
+
+        asyncio.run(train_loop())
 
 if __name__ == '__main__':
     main()

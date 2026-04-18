@@ -7,6 +7,8 @@ from comms.client import PipelineClient
 
 from .utils import pack_tensor, unpack_tensor
 
+import asyncio
+
 class BuddyNode(nn.Module):
     """Wraps a specific slice of the user's model for local execution."""
     def __init__(self, layer_list):
@@ -26,7 +28,7 @@ class TailNodeRunner:
         self.optimizer = torch.optim.Adam(self.model_slice.parameters(), lr=lr)
         self.criterion = nn.MSELoss()
 
-    def _process_batch_callback(self, act_bytes, act_shape, tgt_bytes, tgt_shape):
+    async def _process_batch_callback(self, act_bytes, act_shape, tgt_bytes, tgt_shape):
         """Translates raw network bytes into PyTorch operations."""
 
         # 1. Deserialize Bytes -> Tensors (Wrap with bytearray!)
@@ -70,10 +72,10 @@ class HeadNodeRunner:
         # Initialize the dumb comms client
         self.client = PipelineClient(target_ip=target_ip, port=port)
 
-    def configure_remote(self, start_layer, end_layer):
+    async def configure_remote(self, start_layer, end_layer):
         return self.client.send_pipeline_config(start_layer, end_layer, is_tail=True)
 
-    def train_batch(self, inputs, targets):
+    async def train_batch(self, inputs, targets):
         """Executes one distributed forward/backward pass."""
 
 
@@ -118,30 +120,45 @@ class MiddleNodeRunner:
         # Middle node is a hybrid: it needs a client to talk to the NEXT node
         self.client = PipelineClient(target_ip=target_ip, port=port)
 
-    def _process_batch_callback(self, act_bytes, act_shape, tgt_bytes, tgt_shape):
+        self.mb_counter = 0
+
+    async def _process_batch_callback(self, act_bytes, act_shape, tgt_bytes, tgt_shape):
+        self.mb_counter += 1
+        mb_id = self.mb_counter
+
+        print(f"  [MB {mb_id}] FORWARD Started")
+
         # 1. Unpack what we got from the PREVIOUS node
         activations = unpack_tensor(act_bytes, act_shape, self.device)
         activations.requires_grad_(True)
         
         # 2. Local Forward Pass
         local_output = self.model_slice(activations)
-        
+
+        await asyncio.sleep(0.5) #### REMOVE WHEN TESTING
+        print("WAITING HERE CUS DID NOT COMMENT FORCE WAIT")
+        print(f"  [MB {mb_id}] FORWARD Done. Yielding to network (waiting on Tail...)")
         # 3. Relay to the NEXT node (The "Ping")
         next_act_bytes, next_act_shape = pack_tensor(local_output)
         grad_bytes, grad_shape, loss_val = self.client.send_forward_receive_backward(
             next_act_bytes, next_act_shape, tgt_bytes, tgt_shape
         )
         
+        print(f"  [MB {mb_id}] BACKWARD Received from Tail. Resuming...")
         # 4. Unpack returned gradients from the NEXT node
         remote_grads = unpack_tensor(grad_bytes, grad_shape, self.device)
         
+
         # 5. Local Backward Pass
         self.optimizer.zero_grad()
         local_output.backward(remote_grads)
         self.optimizer.step()
-        
+        await asyncio.sleep(0.5) #### REMOVE WHEN TESTING
+        print("WAITING HERE CUS DID NOT COMMENT FORCE WAIT")
+        print(f"  [MB {mb_id}] BACKWARD Done. Returning gradients to Head.")
         # 6. Send our gradients back to the PREVIOUS node (The "Pong")
         my_grad_bytes, my_grad_shape = pack_tensor(activations.grad)
+
         return my_grad_bytes, my_grad_shape, loss_val
 
     def serve(self, port=12345):
