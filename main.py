@@ -35,7 +35,7 @@ class MultiLayerTrans(nn.Module):
         # Using a ModuleList so the pipeline can easily slice it
         self.layers = nn.ModuleList([
             nn.TransformerEncoderLayer(
-                d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, batch_first=True,
+                d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, batch_first=True, dropout=0.0
             ) for _ in range(num_layers)
         ])
         self.output_layer = nn.Linear(d_model, 1)
