@@ -64,7 +64,7 @@ class DistributedPipeline(nn.Module):
 
         # Parse next node details
         next_ip, next_port = None, None
-        if topology.next_node_idx >= 0:
+        if topology.next_node_idx >= 0 and topology.next_node_idx < len(self.peer_addresses):
             # next_node_address = topology.ordered_node_ips[topology.next_node_idx]
             next_node_address = self.peer_addresses[topology.next_node_idx]
             next_ip, next_port_str = next_node_address.split(':')
