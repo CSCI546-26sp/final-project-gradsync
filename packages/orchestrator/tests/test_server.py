@@ -25,11 +25,21 @@ def make_vote_request(term: int, candidate_ip: str) -> cluster_service_pb2.VoteR
 
 
 def make_topology(
-    coordinator_ip: str, ordered_ips: list[str]
+    coordinator_ip: str, ordered_ips: list[str], target_ip: str = "10.0.0.1:50051"
 ) -> cluster_service_pb2.TopologyConfig:
+    try:
+        idx = ordered_ips.index(target_ip)
+        prev_ip = ordered_ips[idx - 1] if idx > 0 else ""
+        next_ip = ordered_ips[idx + 1] if idx < len(ordered_ips) - 1 else ""
+    except ValueError:
+        idx, prev_ip, next_ip = -1, "", ""
+        
     return cluster_service_pb2.TopologyConfig(
         coordinator_ip=coordinator_ip,
         ordered_node_ips=ordered_ips,
+        node_index=idx,
+        prev_node_ip=prev_ip,
+        next_node_ip=next_ip
     )
 
 
@@ -40,7 +50,7 @@ def make_topology(
 @pytest.fixture
 def node() -> ClusterNode:
     """Fresh FOLLOWER node, term=0, no vote cast, two peers."""
-    return ClusterNode(host_ip="10.0.0.1", peer_ips=["10.0.0.2", "10.0.0.3"])
+    return ClusterNode(host_ip="10.0.0.1:50051", peer_ips=["10.0.0.2:50051", "10.0.0.3:50051"])
 
 
 @pytest.fixture
@@ -55,19 +65,19 @@ def server(node: ClusterNode) -> ClusterServer:
 class TestRequestVote:
     def test_grants_vote_on_first_request(self, server, node):
         """A follower with no prior vote should grant the first valid request."""
-        req = make_vote_request(term=1, candidate_ip="10.0.0.2")
+        req = make_vote_request(term=1, candidate_ip="10.0.0.2:50051")
         resp = server.RequestVote(req, context=None)
 
         assert resp.vote_granted is True
         assert resp.term == 1
-        assert node.voted_for == "10.0.0.2"
+        assert node.voted_for == "10.0.0.2:50051"
         assert node.current_term == 1
 
     def test_rejects_stale_term(self, server, node):
         """A candidate with an older term must be rejected outright."""
         node.current_term = 5
 
-        req = make_vote_request(term=3, candidate_ip="10.0.0.2")
+        req = make_vote_request(term=3, candidate_ip="10.0.0.2:50051")
         resp = server.RequestVote(req, context=None)
 
         assert resp.vote_granted is False
@@ -82,43 +92,43 @@ class TestRequestVote:
         """
         node.current_term = 2
         node.state = NodeState.CANDIDATE
-        node.voted_for = "10.0.0.1"  # voted for self in a previous round
+        node.voted_for = "10.0.0.1:50051"  # voted for self in a previous round
 
-        req = make_vote_request(term=5, candidate_ip="10.0.0.2")
+        req = make_vote_request(term=5, candidate_ip="10.0.0.2:50051")
         resp = server.RequestVote(req, context=None)
 
         assert node.state == NodeState.FOLLOWER
         assert node.current_term == 5
-        assert node.voted_for == "10.0.0.2"
+        assert node.voted_for == "10.0.0.2:50051"
         assert resp.vote_granted is True
 
     def test_vote_is_idempotent_for_same_candidate(self, server, node):
         """Voting for the same candidate twice in the same term is allowed."""
-        req = make_vote_request(term=1, candidate_ip="10.0.0.2")
+        req = make_vote_request(term=1, candidate_ip="10.0.0.2:50051")
 
         resp1 = server.RequestVote(req, context=None)
         resp2 = server.RequestVote(req, context=None)
 
         assert resp1.vote_granted is True
         assert resp2.vote_granted is True
-        assert node.voted_for == "10.0.0.2"
+        assert node.voted_for == "10.0.0.2:50051"
 
     def test_rejects_second_candidate_in_same_term(self, server, node):
         """Once a vote is cast for candidate A in term T, candidate B is rejected."""
-        req_a = make_vote_request(term=1, candidate_ip="10.0.0.2")
-        req_b = make_vote_request(term=1, candidate_ip="10.0.0.3")
+        req_a = make_vote_request(term=1, candidate_ip="10.0.0.2:50051")
+        req_b = make_vote_request(term=1, candidate_ip="10.0.0.3:50051")
 
         resp_a = server.RequestVote(req_a, context=None)
         resp_b = server.RequestVote(req_b, context=None)
 
         assert resp_a.vote_granted is True
         assert resp_b.vote_granted is False
-        assert node.voted_for == "10.0.0.2"   # Must not switch to B
+        assert node.voted_for == "10.0.0.2:50051"   # Must not switch to B
 
     def test_returns_current_term_in_response(self, server, node):
         """The response term must always reflect the node's up-to-date term."""
         node.current_term = 7
-        req = make_vote_request(term=7, candidate_ip="10.0.0.2")
+        req = make_vote_request(term=7, candidate_ip="10.0.0.2:50051")
         resp = server.RequestVote(req, context=None)
 
         assert resp.term == 7
@@ -131,24 +141,28 @@ class TestRequestVote:
 class TestBroadcastTopology:
     def test_sets_topology_config(self, server, node):
         """Receiving a topology should persist it on the node."""
-        topo = make_topology("10.0.0.2", ["10.0.0.2", "10.0.0.1", "10.0.0.3"])
+        topo = make_topology("10.0.0.2:50051", ["10.0.0.2:50051", "10.0.0.1:50051", "10.0.0.3:50051"])
         resp = server.BroadcastTopology(topo, context=None)
 
         assert resp.ok is True
         assert node.topology_config is not None
-        assert node.topology_config.coordinator_ip == "10.0.0.2"
+        assert node.topology_config.coordinator_ip == "10.0.0.2:50051"
+        # Assert the indices are parsed and passed flawlessly through into memory
+        assert node.topology_config.node_index == 1
+        assert node.topology_config.prev_node_ip == "10.0.0.2:50051"
+        assert node.topology_config.next_node_ip == "10.0.0.3:50051"
 
     def test_sets_coordinator_ip(self, server, node):
-        topo = make_topology("10.0.0.2", ["10.0.0.2", "10.0.0.1", "10.0.0.3"])
+        topo = make_topology("10.0.0.2:50051", ["10.0.0.2:50051", "10.0.0.1:50051", "10.0.0.3:50051"])
         server.BroadcastTopology(topo, context=None)
 
-        assert node.coordinator_ip == "10.0.0.2"
+        assert node.coordinator_ip == "10.0.0.2:50051"
 
     def test_reverts_state_to_follower(self, server, node):
         """A candidate receiving a topology must accept it and step down."""
         node.state = NodeState.CANDIDATE
 
-        topo = make_topology("10.0.0.2", ["10.0.0.2", "10.0.0.1"])
+        topo = make_topology("10.0.0.2:50051", ["10.0.0.2:50051", "10.0.0.1:50051"])
         server.BroadcastTopology(topo, context=None)
 
         assert node.state == NodeState.FOLLOWER
@@ -169,7 +183,7 @@ class TestBroadcastTopology:
         t.start()
         time.sleep(0.05)  # Ensure the thread reaches wait() before we notify
 
-        topo = make_topology("10.0.0.2", ["10.0.0.2", "10.0.0.1"])
+        topo = make_topology("10.0.0.2:50051", ["10.0.0.2:50051", "10.0.0.1:50051"])
         server.BroadcastTopology(topo, context=None)
 
         t.join(timeout=2.0)
@@ -177,7 +191,7 @@ class TestBroadcastTopology:
 
     def test_ack_response_is_true(self, server, node):
         """The Ack.ok field must be True on success."""
-        topo = make_topology("10.0.0.3", ["10.0.0.3", "10.0.0.1", "10.0.0.2"])
+        topo = make_topology("10.0.0.3:50051", ["10.0.0.3:50051", "10.0.0.1:50051", "10.0.0.2:50051"])
         resp = server.BroadcastTopology(topo, context=None)
 
         assert resp.ok is True

@@ -18,8 +18,8 @@ class NodeState(Enum):
 
 class ClusterNode:
     def __init__(self, host_ip: str, peer_ips: list, port: int = 50051):
-        self.host_ip = host_ip
-        self.peer_ips = peer_ips
+        self.host_ip = host_ip if ":" in host_ip else f"{host_ip}:{port}"
+        self.peer_ips = [p if ":" in p else f"{p}:{port}" for p in peer_ips]
         self.port = port
         self.state = NodeState.FOLLOWER
         self.current_term = 0
@@ -36,8 +36,11 @@ class ClusterNode:
         cluster_service_pb2_grpc.add_ClusterCoordinatorServicer_to_server(
             ClusterServer(self), server
         )
-        server.add_insecure_port(f'{self.host_ip}:{self.port}')
-        print(f"[{self.host_ip}] Raft Server listening on {self.host_ip}:{self.port}...")
+        bound_port = server.add_insecure_port(self.host_ip)
+        if bound_port == 0:
+            raise RuntimeError(f"Failed to bind to {self.host_ip}. The port is likely already in use by another process.")
+            
+        print(f"[{self.host_ip}] Raft Server listening on {self.host_ip}...")
         server.start()
         return server
 
@@ -191,11 +194,7 @@ class ClusterNode:
             # Eagerly lock our topology under mutex to prevent race conditions
             with self._election_cv:
                 if successes > total_nodes // 2 and self.topology_config is None:
-                    topology = cluster_service_pb2.TopologyConfig(
-                        coordinator_ip=self.host_ip,
-                        ordered_node_ips=ordered_ips,
-                        term=self.current_term
-                    )
+                    topology = self._create_topology_config(self.host_ip, self.host_ip, ordered_ips, self.current_term)
                     self.topology_config = topology
                     self.coordinator_ip = self.host_ip
                     self._election_cv.notify_all()
@@ -224,10 +223,30 @@ class ClusterNode:
                 self.state = NodeState.FOLLOWER
                 self.voted_for = None
 
-    def send_topology(self, peer_ip: str, coordinator_ip: str, ordered_node_ips: list, term: int) -> bool:
-        """Helper to send the topology via the client layer."""
+    def send_topology(self, peer_ip: str, coordinator_ip: str, ordered_ips: list[str], term: int) -> bool:
+        """Sends BroadcastTopology to peer_ip."""
         client = ClusterClient(target_ip=peer_ip, port=self.port)
         try:
-            return client.broadcast_topology(coordinator_ip, ordered_node_ips, term)
+            topology = self._create_topology_config(peer_ip, coordinator_ip, ordered_ips, term)
+            return client.broadcast_topology(topology)
         finally:
             client.close()
+
+    @staticmethod
+    def _create_topology_config(target_ip: str, coordinator_ip: str, ordered_ips: list[str], term: int):
+        """Helper to generate a properly indexed TopologyConfig payload for a specific target node."""
+        try:
+            idx = ordered_ips.index(target_ip)
+            prev_ip = ordered_ips[idx - 1] if idx > 0 else ""
+            next_ip = ordered_ips[idx + 1] if idx < len(ordered_ips) - 1 else ""
+        except ValueError:
+            idx, prev_ip, next_ip = -1, "", ""
+
+        return cluster_service_pb2.TopologyConfig(
+            coordinator_ip=coordinator_ip,
+            ordered_node_ips=ordered_ips,
+            term=term,
+            node_index=idx,
+            prev_node_ip=prev_ip,
+            next_node_ip=next_ip
+        )

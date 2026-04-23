@@ -34,4 +34,7 @@ message TopologyConfig {
   // Ordered list of all node IPs: index 0 = HEAD (coordinator), rest = TAIL
   repeated string ordered_node_ips = 2;
   int64 term = 3; // The term of the leader broadcasting this topology
+  int32  node_index = 4;
+  string prev_node_ip = 5;
+  string next_node_ip = 6;
 }
