@@ -2,35 +2,30 @@ import torch
 import torch.nn as nn
 from .runner import HeadNodeRunner, TailNodeRunner, MiddleNodeRunner
 from .utils import detect_device
+from orchestrator.node import ClusterNode
 
 import asyncio
 
 
 class DistributedPipeline(nn.Module):
-    """
-    The drop-in wrapper for Cross-OS distributed training.
-    """
-
-    def __init__(self, model: nn.Module, role: str, target_ip: str = "127.0.0.1", port: int = 12345, n_micro = 1):
+    def __init__(self, model: nn.Module, host_address: str, peer_addresses: list, n_micro: int = 4):
         super().__init__()
-        self.role = role.lower()
-
-        # 1. Profile and split the user's model
-        self.layout = self._profile_and_split(model)
-
-        # 2. Initialize the correct execution engine
+        self.host_address = host_address
+        self.peer_addresses = peer_addresses
+        self.n_micro = n_micro
+        
+        # Split local address
+        self.local_ip, self.local_port_str = self.host_address.split(':')
+        self.local_port = int(self.local_port_str)
+        
         self.device = detect_device()
-        if self.role == 'tail':
-            self.runner = TailNodeRunner(self.layout[1], self.device, n_micro=n_micro)
+        self.layout = self._profile_and_split(model)
+        
+        self.role = None
+        self.runner = None
 
-        elif self.role == 'head':
-            self.runner = HeadNodeRunner(
-                self.layout[0], target_ip, port, self.device)
-            asyncio.run(self._configure_remote())
-        elif self.role == 'middle':
-            self.runner = MiddleNodeRunner(self.layout[1], target_ip, port, self.device, n_micro=n_micro)
-        else:
-            raise ValueError("Role must be 'head' or 'tail'.")
+        # Execute Raft Election immediately
+        self.join_cluster()
 
     def _profile_and_split(self, model):
         """Internal logic to slice the user's model."""
@@ -59,6 +54,34 @@ class DistributedPipeline(nn.Module):
         )
         if not is_ready:
             print("Warning: Remote Tail Node configuration failed or timed out.")
+
+    def join_cluster(self):
+        print(f"[{self.host_address}] Initiating Cluster Election...")
+        node = ClusterNode(host_ip=self.host_address, peer_ips=self.peer_addresses)
+        topology = node.join_cluster()
+
+        # Parse next node details
+        next_ip, next_port = None, None
+        if topology.next_node_ip:
+            next_ip, next_port_str = topology.next_node_ip.split(':')
+            next_port = int(next_port_str)
+
+        idx = topology.node_index
+        total_nodes = len(topology.ordered_node_ips)
+
+        if idx == 0:
+            self.role = 'head'
+            self.runner = HeadNodeRunner(self.layout[0], target_ip=next_ip, port=next_port, device=self.device)
+        elif idx == total_nodes - 1:
+            self.role = 'tail'
+            self.runner = TailNodeRunner(self.layout[2], device=self.device, n_micro=self.n_micro)
+            self.serve_port = self.local_port 
+        else:
+            self.role = 'middle'
+            self.runner = MiddleNodeRunner(self.layout[1], target_ip=next_ip, port=next_port, device=self.device, n_micro=self.n_micro)
+            self.serve_port = self.local_port
+
+        print(f"[{self.host_address}] Election complete! Assigned Role: {self.role.upper()}")
 
     def serve_forever(self):
         """Called by the Tail node to start listening for network tensors."""

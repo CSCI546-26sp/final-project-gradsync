@@ -2,6 +2,7 @@ import argparse
 import time
 import torch
 import torch.nn as nn
+import json
 
 from pipeline import DistributedPipeline
 
@@ -47,26 +48,39 @@ class MultiLayerTrans(nn.Module):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Test the Distributed ML Pipeline Data Path")
-    parser.add_argument('--role', type=str, required=True, choices=['head', 'middle', 'tail'], help="Role of this node")
-    parser.add_argument('--target_ip', type=str, default='127.0.0.1', help="IP of the Tail node (used by Head)")
-    parser.add_argument('--port', type=int, default=12345, help="Port for gRPC communication")
-    parser.add_argument("--n_micro", type=int, default=4, help="Number of microbatches for 1f1b")
+    parser = argparse.ArgumentParser(description="Auto-Electing Distributed ML Pipeline")
+    parser.add_argument('--host_address', type=str, required=True, help="This machine's IP:PORT (e.g., 192.168.1.50:12345)")
+    parser.add_argument('--config', type=str, default='cluster.json', help="Path to cluster config file")
     args = parser.parse_args()
 
-    print(f"--- Booting as {args.role.upper()} NODE ---")
+    # 1. Load the Configuration
+    try:
+        with open(args.config, 'r') as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        print(f"Error: Could not find {args.config}. Please create it!")
+        return
 
-    # 2. Instantiate the model
+    all_nodes = config.get("cluster_nodes", [])
+    if args.host_address not in all_nodes:
+        print(f"Warning: {args.host_address} is not listed in {args.config}!")
+    
+    peer_addresses = [addr for addr in all_nodes if addr != args.host_address]
+    n_micro = config.get("n_micro", 4)
+
+    print(f"--- Booting Node at {args.host_address} ---")
+    print(f"Peers: {peer_addresses} | Micro-batches: {n_micro}")
+
     set_deterministic_seed(257)
     model = MultiLayerTrans(num_layers=4)
 
-    # 3. Wrap it in your library's pipeline
+    # 2. Initialize Pipeline (Blocks until Raft Election is complete)
+    print(f"Initializing pipeline and electing roles. Waiting on peers...")
     pipeline = DistributedPipeline(
         model=model,
-        role=args.role,
-        target_ip=args.target_ip,
-        port=args.port,
-        n_micro=args.n_micro
+        host_address=args.host_address,
+        peer_addresses=peer_addresses,
+        n_micro=n_micro
     )
 
     # 4. Diverged Execution based on role
@@ -80,6 +94,8 @@ def main():
         print(f"Connecting to Tail node at {args.target_ip}:{args.port}...")
         
         async def train_loop():
+            await pipeline._configure_remote()
+            
             # Generate dummy data (Batch Size: 8, Seq Len: 32, Dim: 1024)
             print("Generating dummy dataset...")
             dummy_inputs = torch.randn(16, 8, 32, 1024)
