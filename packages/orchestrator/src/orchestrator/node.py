@@ -236,18 +236,18 @@ class ClusterNode:
     @staticmethod
     def _create_topology_config(target_ip: str, coordinator_ip: str, ordered_ips: list[str], term: int):
         """Helper to generate a properly indexed TopologyConfig payload for a specific target node."""
-        try:
-            idx = ordered_ips.index(target_ip)
-            prev_ip = ordered_ips[idx - 1] if idx > 0 else ""
-            next_ip = ordered_ips[idx + 1] if idx < len(ordered_ips) - 1 else ""
-        except ValueError:
-            idx, prev_ip, next_ip = -1, "", ""
+        # try:
+        idx = ordered_ips.index(target_ip)
+        prev_idx = idx - 1
+        next_idx = idx + 1
+        # except ValueError:
+        #     idx, prev_idx, next_idx = -1, 
 
         return cluster_service_pb2.TopologyConfig(
             coordinator_ip=coordinator_ip,
             ordered_node_ips=ordered_ips,
             term=term,
             node_index=idx,
-            prev_node_ip=prev_ip,
-            next_node_ip=next_ip
+            prev_node_idx=prev_idx,
+            next_node_idx=next_idx
         )

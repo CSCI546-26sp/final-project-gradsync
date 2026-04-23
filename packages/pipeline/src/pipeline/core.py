@@ -60,10 +60,14 @@ class DistributedPipeline(nn.Module):
         node = ClusterNode(host_ip=self.host_address, peer_ips=self.peer_addresses) # using same port as the training port
         topology = node.join_cluster()
 
+
+
         # Parse next node details
         next_ip, next_port = None, None
-        if topology.next_node_ip:
-            next_ip, next_port_str = topology.next_node_ip.split(':')
+        if topology.next_node_idx >= 0:
+            # next_node_address = topology.ordered_node_ips[topology.next_node_idx]
+            next_node_address = self.peer_addresses[topology.next_node_idx]
+            next_ip, next_port_str = next_node_address.split(':')
             next_port = int(next_port_str)
 
         idx = topology.node_index

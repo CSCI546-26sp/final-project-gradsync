@@ -35,6 +35,6 @@ message TopologyConfig {
   repeated string ordered_node_ips = 2;
   int64 term = 3; // The term of the leader broadcasting this topology
   int32  node_index = 4;
-  string prev_node_ip = 5;
-  string next_node_ip = 6;
+  int32 prev_node_idx = 5;
+  int32 next_node_idx = 6;
 }
