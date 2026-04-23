@@ -84,7 +84,7 @@ def main():
     )
 
     # 4. Diverged Execution based on role
-    if pipeline.role == 'tail':
+    if pipeline.role == 'tail' or pipeline.role == 'middle':
         # The Tail node gets trapped here, spinning up the gRPC server to listen for tensors
         print(f"Initialization complete. Serving pipeline slice on port {pipeline.local_port}...")
         pipeline.serve_forever()

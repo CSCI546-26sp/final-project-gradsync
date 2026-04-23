@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x15\x63luster_service.proto\x12\x07\x63luster\"\r\n\x0bPingRequest\"1\n\x0bVoteRequest\x12\x0c\n\x04term\x18\x01 \x01(\x03\x12\x14\n\x0c\x63\x61ndidate_ip\x18\x02 \x01(\t\"2\n\x0cVoteResponse\x12\x0c\n\x04term\x18\x01 \x01(\x03\x12\x14\n\x0cvote_granted\x18\x02 \x01(\x08\"\x11\n\x03\x41\x63k\x12\n\n\x02ok\x18\x01 \x01(\x08\"\x90\x01\n\x0eTopologyConfig\x12\x16\n\x0e\x63oordinator_ip\x18\x01 \x01(\t\x12\x18\n\x10ordered_node_ips\x18\x02 \x03(\t\x12\x0c\n\x04term\x18\x03 \x01(\x03\x12\x12\n\nnode_index\x18\x04 \x01(\x05\x12\x14\n\x0cprev_node_ip\x18\x05 \x01(\t\x12\x14\n\x0cnext_node_ip\x18\x06 \x01(\t2\xb8\x01\n\x12\x43lusterCoordinator\x12:\n\x0bRequestVote\x12\x14.cluster.VoteRequest\x1a\x15.cluster.VoteResponse\x12:\n\x11\x42roadcastTopology\x12\x17.cluster.TopologyConfig\x1a\x0c.cluster.Ack\x12*\n\x04Ping\x12\x14.cluster.PingRequest\x1a\x0c.cluster.Ackb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x15\x63luster_service.proto\x12\x07\x63luster\"\r\n\x0bPingRequest\"1\n\x0bVoteRequest\x12\x0c\n\x04term\x18\x01 \x01(\x03\x12\x14\n\x0c\x63\x61ndidate_ip\x18\x02 \x01(\t\"2\n\x0cVoteResponse\x12\x0c\n\x04term\x18\x01 \x01(\x03\x12\x14\n\x0cvote_granted\x18\x02 \x01(\x08\"\x11\n\x03\x41\x63k\x12\n\n\x02ok\x18\x01 \x01(\x08\"\x92\x01\n\x0eTopologyConfig\x12\x16\n\x0e\x63oordinator_ip\x18\x01 \x01(\t\x12\x18\n\x10ordered_node_ips\x18\x02 \x03(\t\x12\x0c\n\x04term\x18\x03 \x01(\x03\x12\x12\n\nnode_index\x18\x04 \x01(\x05\x12\x15\n\rprev_node_idx\x18\x05 \x01(\x05\x12\x15\n\rnext_node_idx\x18\x06 \x01(\x05\x32\xb8\x01\n\x12\x43lusterCoordinator\x12:\n\x0bRequestVote\x12\x14.cluster.VoteRequest\x1a\x15.cluster.VoteResponse\x12:\n\x11\x42roadcastTopology\x12\x17.cluster.TopologyConfig\x1a\x0c.cluster.Ack\x12*\n\x04Ping\x12\x14.cluster.PingRequest\x1a\x0c.cluster.Ackb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -40,7 +40,7 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_ACK']._serialized_start=152
   _globals['_ACK']._serialized_end=169
   _globals['_TOPOLOGYCONFIG']._serialized_start=172
-  _globals['_TOPOLOGYCONFIG']._serialized_end=316
-  _globals['_CLUSTERCOORDINATOR']._serialized_start=319
-  _globals['_CLUSTERCOORDINATOR']._serialized_end=503
+  _globals['_TOPOLOGYCONFIG']._serialized_end=318
+  _globals['_CLUSTERCOORDINATOR']._serialized_start=321
+  _globals['_CLUSTERCOORDINATOR']._serialized_end=505
 # @@protoc_insertion_point(module_scope)
