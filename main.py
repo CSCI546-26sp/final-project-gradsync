@@ -116,8 +116,8 @@ def main():
                     x = dummy_inputs[batch_idx]
                     y = dummy_targets[batch_idx]
 
-                    micro_x = torch.chunk(x, chunks=args.n_micro, dim=0)
-                    micro_y = torch.chunk(y, chunks=args.n_micro, dim=0)
+                    micro_x = torch.chunk(x, chunks=n_micro, dim=0)
+                    micro_y = torch.chunk(y, chunks=n_micro, dim=0)
 
                     pipeline.zero_grad()
 
