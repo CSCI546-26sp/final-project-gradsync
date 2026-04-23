@@ -57,7 +57,7 @@ class DistributedPipeline(nn.Module):
 
     def join_cluster(self):
         print(f"[{self.host_address}] Initiating Cluster Election...")
-        node = ClusterNode(host_ip=self.host_address, peer_ips=self.peer_addresses)
+        node = ClusterNode(host_ip=self.host_address, peer_ips=self.peer_addresses, port=self.local_port)
         topology = node.join_cluster()
 
         # Parse next node details

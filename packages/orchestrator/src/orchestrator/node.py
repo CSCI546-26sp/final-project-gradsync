@@ -21,6 +21,7 @@ class ClusterNode:
         self.host_ip = host_ip if ":" in host_ip else f"{host_ip}:{port}"
         self.peer_ips = [p if ":" in p else f"{p}:{port}" for p in peer_ips]
         self.port = port
+        print(self.port)
         self.state = NodeState.FOLLOWER
         self.current_term = 0
         self.voted_for = None    # candidate_ip this node voted for in current term
