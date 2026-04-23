@@ -84,12 +84,12 @@ def main():
     )
 
     # 4. Diverged Execution based on role
-    if args.role in ['tail', 'middle']:
+    if pipeline.role == 'tail':
         # The Tail node gets trapped here, spinning up the gRPC server to listen for tensors
-        print(f"Initialization complete. Serving pipeline slice on port {args.port}...")
+        print(f"Initialization complete. Serving pipeline slice on port {pipeline.port}...")
         pipeline.serve_forever()
 
-    elif args.role == 'head':
+    elif pipeline.role == 'head':
         # The Head node drives the actual training loop
         print(f"Connecting to Tail node at {args.target_ip}:{args.port}...")
         
