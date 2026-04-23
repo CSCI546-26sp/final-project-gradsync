@@ -18,8 +18,8 @@ class NodeState(Enum):
 
 class ClusterNode:
     def __init__(self, host_ip: str, peer_ips: list, port: int = 50051):
-        self.host_ip = host_ip
-        self.peer_ips = peer_ips
+        self.host_ip = host_ip if ":" in host_ip else f"{host_ip}:{port}"
+        self.peer_ips = [p if ":" in p else f"{p}:{port}" for p in peer_ips]
         self.port = port
         self.state = NodeState.FOLLOWER
         self.current_term = 0
@@ -36,8 +36,11 @@ class ClusterNode:
         cluster_service_pb2_grpc.add_ClusterCoordinatorServicer_to_server(
             ClusterServer(self), server
         )
-        server.add_insecure_port(f'{self.host_ip}:{self.port}')
-        print(f"[{self.host_ip}] Raft Server listening on {self.host_ip}:{self.port}...")
+        bound_port = server.add_insecure_port(self.host_ip)
+        if bound_port == 0:
+            raise RuntimeError(f"Failed to bind to {self.host_ip}. The port is likely already in use by another process.")
+            
+        print(f"[{self.host_ip}] Raft Server listening on {self.host_ip}...")
         server.start()
         return server
 

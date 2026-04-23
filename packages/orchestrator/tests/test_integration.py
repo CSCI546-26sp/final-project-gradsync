@@ -150,10 +150,10 @@ def test_single_node_elects_itself():
     cluster.wait(timeout=3.0)
 
     leader = cluster.check_one_leader()
-    assert leader.host_ip == "127.0.0.1"
-    assert nodes[0].coordinator_ip == "127.0.0.1"
+    assert leader.host_ip == "127.0.0.1:50090"
+    assert nodes[0].coordinator_ip == "127.0.0.1:50090"
     ordered = list(nodes[0].topology_config.ordered_node_ips)
-    assert ordered == ["127.0.0.1"]
+    assert ordered == ["127.0.0.1:50090"]
 
 
 @pytest.mark.timeout(10)
@@ -273,9 +273,9 @@ def test_three_node_cluster_staggered_start():
     
     # Stagger nodes by 0, 1, and 2 seconds respectively.
     delays = {
-        "127.0.0.1": 0.0,
-        "127.0.0.2": 5.0,
-        "127.0.0.3": 10.0
+        "127.0.0.1:50090": 0.0,
+        "127.0.0.2:50090": 5.0,
+        "127.0.0.3:50090": 10.0
     }
     cluster.begin(stagger_delays=delays)
     

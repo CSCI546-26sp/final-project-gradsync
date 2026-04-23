@@ -19,10 +19,37 @@ from orchestrator.proto import cluster_service_pb2
 @pytest.fixture
 def three_node() -> ClusterNode:
     """Node as part of a 3-node cluster."""
-    return ClusterNode(host_ip="10.0.0.1", peer_ips=["10.0.0.2", "10.0.0.3"])
+    return ClusterNode(host_ip="10.0.0.1:50051", peer_ips=["10.0.0.2:50051", "10.0.0.3:50051"])
+
+# ---------------------------------------------------------------------------
+# IP Normalization
+# ---------------------------------------------------------------------------
+
+class TestIPNormalization:
+    def test_appends_default_port_to_raw_ips(self):
+        node = ClusterNode(host_ip="10.0.0.1", peer_ips=["10.0.0.2", "10.0.0.3"])
+        assert node.host_ip == "10.0.0.1:50051"
+        assert node.peer_ips == ["10.0.0.2:50051", "10.0.0.3:50051"]
+
+    def test_preserves_explicit_ports(self):
+        node = ClusterNode(host_ip="10.0.0.1:8080", peer_ips=["10.0.0.1:8081", "10.0.0.2"])
+        assert node.host_ip == "10.0.0.1:8080"
+        assert node.peer_ips == ["10.0.0.1:8081", "10.0.0.2:50051"]
 
 
+# ---------------------------------------------------------------------------
+# Server Binding
+# ---------------------------------------------------------------------------
 
+class TestServerBinding:
+    @patch("orchestrator.node.grpc.server")
+    def test_raises_runtime_error_on_port_collision(self, mock_grpc_server, three_node):
+        mock_server_instance = MagicMock()
+        mock_grpc_server.return_value = mock_server_instance
+        mock_server_instance.add_insecure_port.return_value = 0
+
+        with pytest.raises(RuntimeError, match="Failed to bind to 10.0.0.1:50051"):
+            three_node._serve_cluster()
 
 
 # ---------------------------------------------------------------------------
@@ -57,14 +84,14 @@ class TestSendRequestVote:
     def test_returns_true_when_vote_granted(self, three_node):
         with patch("orchestrator.node.ClusterClient") as MockClient:
             MockClient.return_value.request_vote.return_value = (True, 1)
-            result = three_node.send_request_vote("10.0.0.2", term=1, candidate_ip="10.0.0.1")
+            result = three_node.send_request_vote("10.0.0.2:50051", term=1, candidate_ip="10.0.0.1:50051")
 
         assert result is True
 
     def test_returns_false_when_vote_denied(self, three_node):
         with patch("orchestrator.node.ClusterClient") as MockClient:
             MockClient.return_value.request_vote.return_value = (False, 1)
-            result = three_node.send_request_vote("10.0.0.2", term=1, candidate_ip="10.0.0.1")
+            result = three_node.send_request_vote("10.0.0.2:50051", term=1, candidate_ip="10.0.0.1:50051")
 
         assert result is False
 
@@ -78,7 +105,7 @@ class TestSendRequestVote:
 
         with patch("orchestrator.node.ClusterClient") as MockClient:
             MockClient.return_value.request_vote.return_value = (False, 10)
-            three_node.send_request_vote("10.0.0.2", term=1, candidate_ip="10.0.0.1")
+            three_node.send_request_vote("10.0.0.2:50051", term=1, candidate_ip="10.0.0.1:50051")
 
         assert three_node.state == NodeState.FOLLOWER
         assert three_node.current_term == 10
@@ -91,7 +118,7 @@ class TestSendRequestVote:
 
         with patch("orchestrator.node.ClusterClient") as MockClient:
             MockClient.return_value.request_vote.return_value = (True, 3)
-            three_node.send_request_vote("10.0.0.2", term=3, candidate_ip="10.0.0.1")
+            three_node.send_request_vote("10.0.0.2:50051", term=3, candidate_ip="10.0.0.1:50051")
 
         assert three_node.state == NodeState.CANDIDATE  # Unchanged
 
@@ -102,7 +129,7 @@ class TestSendRequestVote:
 
         with patch("orchestrator.node.ClusterClient") as MockClient:
             MockClient.return_value.request_vote.return_value = (True, 3)
-            three_node.send_request_vote("10.0.0.2", term=5, candidate_ip="10.0.0.1")
+            three_node.send_request_vote("10.0.0.2:50051", term=5, candidate_ip="10.0.0.1:50051")
 
         assert three_node.state == NodeState.CANDIDATE
         assert three_node.current_term == 5
@@ -112,7 +139,7 @@ class TestSendRequestVote:
         with patch("orchestrator.node.ClusterClient") as MockClient:
             mock_instance = MockClient.return_value
             mock_instance.request_vote.return_value = (True, 1)
-            three_node.send_request_vote("10.0.0.2", term=1, candidate_ip="10.0.0.1")
+            three_node.send_request_vote("10.0.0.2:50051", term=1, candidate_ip="10.0.0.1:50051")
 
         mock_instance.close.assert_called_once()
 
@@ -126,7 +153,7 @@ class TestSendRequestVote:
             mock_instance.request_vote.side_effect = RuntimeError("boom")
 
             with pytest.raises(RuntimeError):
-                three_node.send_request_vote("10.0.0.2", term=1, candidate_ip="10.0.0.1")
+                three_node.send_request_vote("10.0.0.2:50051", term=1, candidate_ip="10.0.0.1:50051")
 
         mock_instance.close.assert_called_once()
 
@@ -150,14 +177,14 @@ class TestBroadcastTopology:
             MockClient.return_value.broadcast_topology.return_value = True
             three_node.broadcast_topology()
 
-        assert three_node.coordinator_ip == "10.0.0.1"
+        assert three_node.coordinator_ip == "10.0.0.1:50051"
 
     def test_topology_config_coordinator_ip(self, three_node):
         with patch("orchestrator.node.ClusterClient") as MockClient:
             MockClient.return_value.broadcast_topology.return_value = True
             three_node.broadcast_topology()
 
-        assert three_node.topology_config.coordinator_ip == "10.0.0.1"
+        assert three_node.topology_config.coordinator_ip == "10.0.0.1:50051"
 
     def test_ordered_ips_includes_all_nodes(self, three_node):
         with patch("orchestrator.node.ClusterClient") as MockClient:
@@ -165,7 +192,7 @@ class TestBroadcastTopology:
             three_node.broadcast_topology()
 
         ordered = list(three_node.topology_config.ordered_node_ips)
-        assert set(ordered) == {"10.0.0.1", "10.0.0.2", "10.0.0.3"}
+        assert set(ordered) == {"10.0.0.1:50051", "10.0.0.2:50051", "10.0.0.3:50051"}
         assert len(ordered) == 3
 
     def test_leader_is_first_in_ordered_ips(self, three_node):
@@ -175,7 +202,7 @@ class TestBroadcastTopology:
             three_node.broadcast_topology()
 
         ordered = list(three_node.topology_config.ordered_node_ips)
-        assert ordered[0] == "10.0.0.1"
+        assert ordered[0] == "10.0.0.1:50051"
 
     def test_sends_to_every_peer(self, three_node):
         """One ClusterClient must be instantiated (and closed) per peer."""
@@ -192,7 +219,7 @@ class TestBroadcastTopology:
             three_node.broadcast_topology()
 
         called_ips = {c.kwargs.get("target_ip") or c.args[0] for c in MockClient.call_args_list}
-        assert called_ips == {"10.0.0.2", "10.0.0.3"}
+        assert called_ips == {"10.0.0.2:50051", "10.0.0.3:50051"}
 
 
 # ---------------------------------------------------------------------------
@@ -203,32 +230,32 @@ class TestCreateTopologyConfig:
     """Unit tests for the topological graph evaluation static helper."""
     
     def test_head_element(self):
-        ordered_ips = ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"]
-        topo = ClusterNode._create_topology_config("10.0.0.1", "10.0.0.1", ordered_ips, 1)
+        ordered_ips = ["10.0.0.1:50051", "10.0.0.2:50051", "10.0.0.3:50051", "10.0.0.4:50051"]
+        topo = ClusterNode._create_topology_config("10.0.0.1:50051", "10.0.0.1:50051", ordered_ips, 1)
         
         assert topo.node_index == 0
         assert topo.prev_node_ip == ""
-        assert topo.next_node_ip == "10.0.0.2"
+        assert topo.next_node_ip == "10.0.0.2:50051"
 
     def test_middle_element(self):
-        ordered_ips = ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"]
-        topo = ClusterNode._create_topology_config("10.0.0.2", "10.0.0.1", ordered_ips, 1)
+        ordered_ips = ["10.0.0.1:50051", "10.0.0.2:50051", "10.0.0.3:50051", "10.0.0.4:50051"]
+        topo = ClusterNode._create_topology_config("10.0.0.2:50051", "10.0.0.1:50051", ordered_ips, 1)
         
         assert topo.node_index == 1
-        assert topo.prev_node_ip == "10.0.0.1"
-        assert topo.next_node_ip == "10.0.0.3"
+        assert topo.prev_node_ip == "10.0.0.1:50051"
+        assert topo.next_node_ip == "10.0.0.3:50051"
 
     def test_tail_element(self):
-        ordered_ips = ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"]
-        topo = ClusterNode._create_topology_config("10.0.0.4", "10.0.0.1", ordered_ips, 1)
+        ordered_ips = ["10.0.0.1:50051", "10.0.0.2:50051", "10.0.0.3:50051", "10.0.0.4:50051"]
+        topo = ClusterNode._create_topology_config("10.0.0.4:50051", "10.0.0.1:50051", ordered_ips, 1)
         
         assert topo.node_index == 3
-        assert topo.prev_node_ip == "10.0.0.3"
+        assert topo.prev_node_ip == "10.0.0.3:50051"
         assert topo.next_node_ip == ""
 
     def test_missing_element_fallback(self):
-        ordered_ips = ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"]
-        topo = ClusterNode._create_topology_config("10.0.0.9", "10.0.0.1", ordered_ips, 1)
+        ordered_ips = ["10.0.0.1:50051", "10.0.0.2:50051", "10.0.0.3:50051", "10.0.0.4:50051"]
+        topo = ClusterNode._create_topology_config("10.0.0.9:50051", "10.0.0.1:50051", ordered_ips, 1)
         
         assert topo.node_index == -1
         assert topo.prev_node_ip == ""

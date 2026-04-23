@@ -5,9 +5,9 @@ from .proto import cluster_service_pb2_grpc
 
 class ClusterClient:
     def __init__(self, target_ip="localhost", port=50051):
-        self.target_ip = target_ip
+        self.target_ip = target_ip if ":" in target_ip else f"{target_ip}:{port}"
         self.port = port
-        self.channel = grpc.insecure_channel(f"{target_ip}:{port}")
+        self.channel = grpc.insecure_channel(self.target_ip)
         self.stub = cluster_service_pb2_grpc.ClusterCoordinatorStub(self.channel)
 
     def request_vote(self, term: int, candidate_ip: str) -> tuple[bool, int]:
