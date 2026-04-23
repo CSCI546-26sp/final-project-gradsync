@@ -5,9 +5,9 @@ from .proto import cluster_service_pb2_grpc
 
 class ClusterClient:
     def __init__(self, target_ip="localhost", port=50051):
-        self.target_ip = target_ip
+        self.target_ip = target_ip if ":" in target_ip else f"{target_ip}:{port}"
         self.port = port
-        self.channel = grpc.insecure_channel(f"{target_ip}:{port}")
+        self.channel = grpc.insecure_channel(self.target_ip)
         self.stub = cluster_service_pb2_grpc.ClusterCoordinatorStub(self.channel)
 
     def request_vote(self, term: int, candidate_ip: str) -> tuple[bool, int]:
@@ -27,17 +27,22 @@ class ClusterClient:
             # If the node is unreachable or offline, default to denying vote
             return False, 0
 
-    def broadcast_topology(self, coordinator_ip: str, ordered_node_ips: list) -> bool:
+    def broadcast_topology(self, topology: cluster_service_pb2.TopologyConfig) -> bool:
         """
         Sends BroadcastTopology gRPC to the target peer.
         """
-        topology = cluster_service_pb2.TopologyConfig(
-            coordinator_ip=coordinator_ip,
-            ordered_node_ips=ordered_node_ips
-        )
         try:
             # 1.0s timeout for topology dissemination
             response = self.stub.BroadcastTopology(topology, timeout=1.0)
+            return response.ok
+        except grpc.RpcError:
+            return False
+
+    def ping(self) -> bool:
+        """Sends Ping RPC to verify node is online."""
+        try:
+            request = cluster_service_pb2.PingRequest()
+            response = self.stub.Ping(request, timeout=0.5)
             return response.ok
         except grpc.RpcError:
             return False
