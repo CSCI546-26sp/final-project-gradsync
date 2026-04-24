@@ -56,7 +56,6 @@ class PipelineClient:
         print(f"request_proto_bytes: {request_proto_bytes}")
 
         try:
-            print("None") if self.stub is None else print("Not None")
             response = await self.stub.ExecutePipelineStage(request)
 
 

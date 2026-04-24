@@ -17,11 +17,9 @@ class NodeState(Enum):
 
 
 class ClusterNode:
-    def __init__(self, host_ip: str, peer_ips: list, port: int = 51234):
+    def __init__(self, host_ip: str, peer_ips: list, port: int = 50051):
 
-        # CHANGE THISSSSS!!!!!!!!!!!!!!!!
-        self.host_ip = host_ip.split(":")[0] + ":"+ str(port)
-        #####################################
+        self.host_ip = host_ip if ":" in host_ip else f"{host_ip}:{port}"
         self.peer_ips = [p if ":" in p else f"{p}:{port}" for p in peer_ips]
         self.port = port
         self.state = NodeState.FOLLOWER
@@ -39,7 +37,6 @@ class ClusterNode:
         cluster_service_pb2_grpc.add_ClusterCoordinatorServicer_to_server(
             ClusterServer(self), server
         )
-        print(self.host_ip)
         bound_port = server.add_insecure_port(self.host_ip)
         if bound_port == 0:
             raise RuntimeError(f"Failed to bind to {self.host_ip}. The port is likely already in use by another process.")
@@ -149,21 +146,20 @@ class ClusterNode:
             return
 
         print(f"[{self.host_ip}] Waiting for peers to come online: {self.peer_ips}")
-        print(self.peer_ips)
         pending = set(self.peer_ips)
         
         while pending:
             # We iterate over a copy (list) so we can safely remove from the original set
             for peer in list(pending):
-                client = ClusterClient(target_ip=peer.split(":")[0], port=self.port)
+                client = ClusterClient(target_ip=peer, port=self.port)
                 try:
                     if client.ping():
-                        print(f"[{self.host_ip}] Peer {client.target_ip} is ONLINE!")
+                        print(f"[{self.host_ip}] Peer {peer} is ONLINE!")
                         pending.remove(peer)
                     else:
-                        print(f"[{self.host_ip}] Peer {client.target_ip} ping returned False.")
+                        print(f"[{self.host_ip}] Peer {peer} ping returned False.")
                 except Exception as e:
-                    print(f"[{self.host_ip}] Exception pinging {client.target_ip}: {e}")
+                    print(f"[{self.host_ip}] Exception pinging {peer}: {e}")
                 finally:
                     client.close()
                     

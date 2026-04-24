@@ -49,7 +49,9 @@ class MultiLayerTrans(nn.Module):
 
 def main():
     parser = argparse.ArgumentParser(description="Auto-Electing Distributed ML Pipeline")
-    parser.add_argument('--host_address', type=str, required=True, help="This machine's IP:PORT (e.g., 192.168.1.50:12345)")
+    parser.add_argument('--host_ip', type=str, required=True, help="This machine's IP (e.g., 192.168.1.50)")
+    parser.add_argument("--elec_port", type=str, required=True, help="This machine's PORT (e.g., 12345)")
+    parser.add_argument("--train_port", type=str, required=True, help="This machine's PORT (e.g., 45677)")
     parser.add_argument('--config', type=str, default='cluster.json', help="Path to cluster config file")
     args = parser.parse_args()
 
@@ -60,15 +62,26 @@ def main():
     except FileNotFoundError:
         print(f"Error: Could not find {args.config}. Please create it!")
         return
+    
+    host_address = f"{args.host_ip}:{args.train_port}"
+    election_host_address = f"{args.host_ip}:{args.elec_port}"
+    
+    ell_nodes = config.get("election_nodes", [])
+    if election_host_address not in ell_nodes:
+        print(f"Warning: {election_host_address} is not listed in {args.config}!")
+    print(f"Election Nodes: {ell_nodes}")
+    
+    election_addresses = [addr for addr in ell_nodes if addr != election_host_address]
 
     all_nodes = config.get("cluster_nodes", [])
-    if args.host_address not in all_nodes:
-        print(f"Warning: {args.host_address} is not listed in {args.config}!")
+    if host_address not in all_nodes:
+        print(f"Warning: {host_address} is not listed in {args.config}!")
+    print(f"Cluster Nodes: {all_nodes}")
     
-    peer_addresses = [addr for addr in all_nodes if addr != args.host_address]
+    peer_addresses = [addr for addr in all_nodes if addr != host_address]
     n_micro = config.get("n_micro", 4)
 
-    print(f"--- Booting Node at {args.host_address} ---")
+    print(f"--- Booting Node at {host_address} ---")
     print(f"Peers: {peer_addresses} | Micro-batches: {n_micro}")
 
     set_deterministic_seed(257)
@@ -78,7 +91,9 @@ def main():
     print(f"Initializing pipeline and electing roles. Waiting on peers...")
     pipeline = DistributedPipeline(
         model=model,
-        host_address=args.host_address,
+        host_address=host_address,
+        election_host_address = election_host_address,
+        election_addresses=election_addresses,
         peer_addresses=peer_addresses,
         n_micro=n_micro
     )

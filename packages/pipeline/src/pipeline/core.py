@@ -9,9 +9,11 @@ import asyncio
 
 
 class DistributedPipeline(nn.Module):
-    def __init__(self, model: nn.Module, host_address: str, peer_addresses: list, n_micro: int = 4):
+    def __init__(self, model: nn.Module, host_address: str, election_host_address: str, election_addresses: list, peer_addresses: list, n_micro: int = 4):
         super().__init__()
         self.host_address = host_address
+        self.election_host_address = election_host_address
+        self.election_addresses = election_addresses
         self.peer_addresses = peer_addresses
         self.n_micro = n_micro
         
@@ -58,7 +60,7 @@ class DistributedPipeline(nn.Module):
 
     def join_cluster(self):
         print(f"[{self.host_address}] Initiating Cluster Election...")
-        node = ClusterNode(host_ip=self.host_address, peer_ips=self.peer_addresses)
+        node = ClusterNode(host_ip=self.election_host_address, peer_ips=self.election_addresses)
         topology = node.join_cluster()
 
         node.shutdown()  # We only needed the election result, so we can shut down the Raft node now
