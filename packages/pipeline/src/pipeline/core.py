@@ -58,7 +58,7 @@ class DistributedPipeline(nn.Module):
 
     def join_cluster(self):
         print(f"[{self.host_address}] Initiating Cluster Election...")
-        node = ClusterNode(host_ip=self.host_address, peer_ips=self.peer_addresses) # using same port as the training port
+        node = ClusterNode(host_ip=self.host_address, peer_ips=self.peer_addresses)
         topology = node.join_cluster()
 
         node.shutdown()  # We only needed the election result, so we can shut down the Raft node now

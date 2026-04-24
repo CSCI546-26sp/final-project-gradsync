@@ -18,10 +18,13 @@ class NodeState(Enum):
 
 class ClusterNode:
     def __init__(self, host_ip: str, peer_ips: list, port: int = 50051):
-        self.host_ip = host_ip if ":" in host_ip else f"{host_ip}:{port}"
+
+        # CHANGE THISSSSS!!!!!!!!!!!!!!!!
+
+        self.host_ip = host_ip.split(":")[0] + ":"+ str(port)
+        #####################################
         self.peer_ips = [p if ":" in p else f"{p}:{port}" for p in peer_ips]
         self.port = port
-        print(self.port)
         self.state = NodeState.FOLLOWER
         self.current_term = 0
         self.voted_for = None    # candidate_ip this node voted for in current term
@@ -37,6 +40,7 @@ class ClusterNode:
         cluster_service_pb2_grpc.add_ClusterCoordinatorServicer_to_server(
             ClusterServer(self), server
         )
+        print(self.host_ip)
         bound_port = server.add_insecure_port(self.host_ip)
         if bound_port == 0:
             raise RuntimeError(f"Failed to bind to {self.host_ip}. The port is likely already in use by another process.")
