@@ -39,7 +39,6 @@ class PipelineRouterStub(object):
                 request_serializer=tensor__service__pb2.SplitConfig.SerializeToString,
                 response_deserializer=tensor__service__pb2.ConfigAck.FromString,
                 _registered_method=True)
-        print("I am being called") # Debug print to check if the stub is being initialized
         self.ExecutePipelineStage = channel.unary_unary(
                 '/buddies_network.PipelineRouter/ExecutePipelineStage',
                 request_serializer=tensor__service__pb2.ForwardPayload.SerializeToString,
