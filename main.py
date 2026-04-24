@@ -87,7 +87,7 @@ def main():
     if pipeline.role == 'tail' or pipeline.role == 'middle':
         # The Tail node gets trapped here, spinning up the gRPC server to listen for tensors
         print(f"Initialization complete. Serving pipeline slice on port {pipeline.local_port}...")
-        pipeline.serve_forever()
+        pipeline.serve_forever(pipeline.local_port)
 
     elif pipeline.role == 'head':
         # The Head node drives the actual training loop

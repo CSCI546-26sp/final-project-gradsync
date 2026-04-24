@@ -3,6 +3,7 @@ import torch.nn as nn
 from .runner import HeadNodeRunner, TailNodeRunner, MiddleNodeRunner
 from .utils import detect_device
 from orchestrator.node import ClusterNode
+import time
 
 import asyncio
 
@@ -60,8 +61,7 @@ class DistributedPipeline(nn.Module):
         node = ClusterNode(host_ip=self.host_address, peer_ips=self.peer_addresses) # using same port as the training port
         topology = node.join_cluster()
 
-
-
+        node.shutdown()  # We only needed the election result, so we can shut down the Raft node now
         # Parse next node details
         next_ip, next_port = None, None
         if topology.next_node_idx >= 0 and topology.next_node_idx < len(self.peer_addresses):
@@ -87,11 +87,11 @@ class DistributedPipeline(nn.Module):
 
         print(f"[{self.host_address}] Election complete! Assigned Role: {self.role.upper()}")
 
-    def serve_forever(self):
+    def serve_forever(self, port):
         """Called by the Tail node to start listening for network tensors."""
         # if self.role != 'tail':
         #     raise RuntimeError("Only the 'tail' node can serve.")
-        self.runner.serve()
+        self.runner.serve(port=port)
 
     async def train_step(self, inputs, targets):
         """Called by the Head node to execute a distributed forward/backward pass."""
