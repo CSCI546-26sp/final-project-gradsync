@@ -63,7 +63,6 @@ class DistributedPipeline(nn.Module):
         node = ClusterNode(host_ip=self.election_host_address, peer_ips=self.election_addresses)
         topology = node.join_cluster()
 
-        node.shutdown()  # We only needed the election result, so we can shut down the Raft node now
         # Parse next node details
         next_ip, next_port = None, None
         if topology.next_node_idx >= 0 and topology.next_node_idx < len(self.peer_addresses):
