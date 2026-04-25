@@ -4,33 +4,44 @@ from .proto import tensor_service_pb2_grpc
 
 
 class PipelineClient:
-    def __init__(self, target_ip="localhost", port=50051):
+    def __init__(self, target_ip="localhost", port=12345):
         options = [
             ('grpc.max_send_message_length', 100 * 1024 * 1024),
             ('grpc.max_receive_message_length', 100 * 1024 * 1024)
         ]
 
+        self.target = f"{target_ip}:{port}"
+        self.options = options
+
+        self.channel = None
+        self.stub = None
+
+    def _connect(self):
         # Establish the connection to the next node in the sequence
-        self.channel = grpc.insecure_channel(
-            f'{target_ip}:{port}', options=options)
+        self.channel = grpc.aio.insecure_channel(
+            self.target, options=self.options)
         self.stub = tensor_service_pb2_grpc.PipelineRouterStub(self.channel)
 
-    def send_pipeline_config(self, start_layer, end_layer, is_tail=True):
+
+
+    async def send_pipeline_config(self, start_layer, end_layer, is_tail=True):
+        self._connect()
         request = tensor_service_pb2.SplitConfig(
             start_layer_idx=start_layer,
             end_layer_idx=end_layer,
             is_tail_node=is_tail
         )
         try:
-            response = self.stub.AssignConfiguration(request)
+            response = await self.stub.AssignConfiguration(request)
             return response.is_ready
         except grpc.RpcError as e:
             print(
                 f"Failed to configure remote node {self.channel._channel.target()}: {e.details()}")
             return False
 
-    def send_forward_receive_backward(self, act_bytes, act_shape, target_bytes, target_shape):
+    async def send_forward_receive_backward(self, act_bytes, act_shape, target_bytes, target_shape):
         """Blocks until the remote server finishes the forward/backward pass and returns gradients."""
+        self._connect()
         request = tensor_service_pb2.ForwardPayload(
             activation_shape=act_shape,
             activation_bytes=act_bytes,
@@ -45,7 +56,7 @@ class PipelineClient:
         print(f"request_proto_bytes: {request_proto_bytes}")
 
         try:
-            response = self.stub.ExecutePipelineStage(request)
+            response = await self.stub.ExecutePipelineStage(request)
 
 
             response_proto_bytes = len(response.SerializeToString())
@@ -59,6 +70,7 @@ class PipelineClient:
             print(f"Pipeline transmission failed: {e.details()}")
             raise e
 
-    def close(self):
+    async def close(self):
         """Cleanly shut down the channel."""
-        self.channel.close()
+        if self.channel is not None:
+            await self.channel.close()

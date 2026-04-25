@@ -27,19 +27,16 @@ def make_vote_request(term: int, candidate_ip: str) -> cluster_service_pb2.VoteR
 def make_topology(
     coordinator_ip: str, ordered_ips: list[str], target_ip: str = "10.0.0.1:50051"
 ) -> cluster_service_pb2.TopologyConfig:
-    try:
-        idx = ordered_ips.index(target_ip)
-        prev_ip = ordered_ips[idx - 1] if idx > 0 else ""
-        next_ip = ordered_ips[idx + 1] if idx < len(ordered_ips) - 1 else ""
-    except ValueError:
-        idx, prev_ip, next_ip = -1, "", ""
+    idx = ordered_ips.index(target_ip)
+    prev_idx = idx - 1
+    next_idx = idx + 1
         
     return cluster_service_pb2.TopologyConfig(
         coordinator_ip=coordinator_ip,
         ordered_node_ips=ordered_ips,
         node_index=idx,
-        prev_node_ip=prev_ip,
-        next_node_ip=next_ip
+        prev_node_idx=prev_idx,
+        next_node_idx=next_idx
     )
 
 
@@ -149,8 +146,8 @@ class TestBroadcastTopology:
         assert node.topology_config.coordinator_ip == "10.0.0.2:50051"
         # Assert the indices are parsed and passed flawlessly through into memory
         assert node.topology_config.node_index == 1
-        assert node.topology_config.prev_node_ip == "10.0.0.2:50051"
-        assert node.topology_config.next_node_ip == "10.0.0.3:50051"
+        assert node.topology_config.prev_node_idx == 0
+        assert node.topology_config.next_node_idx == 2
 
     def test_sets_coordinator_ip(self, server, node):
         topo = make_topology("10.0.0.2:50051", ["10.0.0.2:50051", "10.0.0.1:50051", "10.0.0.3:50051"])

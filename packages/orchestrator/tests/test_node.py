@@ -234,29 +234,26 @@ class TestCreateTopologyConfig:
         topo = ClusterNode._create_topology_config("10.0.0.1:50051", "10.0.0.1:50051", ordered_ips, 1)
         
         assert topo.node_index == 0
-        assert topo.prev_node_ip == ""
-        assert topo.next_node_ip == "10.0.0.2:50051"
+        assert topo.prev_node_idx == -1
+        assert topo.next_node_idx == 1
 
     def test_middle_element(self):
         ordered_ips = ["10.0.0.1:50051", "10.0.0.2:50051", "10.0.0.3:50051", "10.0.0.4:50051"]
         topo = ClusterNode._create_topology_config("10.0.0.2:50051", "10.0.0.1:50051", ordered_ips, 1)
         
         assert topo.node_index == 1
-        assert topo.prev_node_ip == "10.0.0.1:50051"
-        assert topo.next_node_ip == "10.0.0.3:50051"
+        assert topo.prev_node_idx == 0
+        assert topo.next_node_idx == 2
 
     def test_tail_element(self):
         ordered_ips = ["10.0.0.1:50051", "10.0.0.2:50051", "10.0.0.3:50051", "10.0.0.4:50051"]
         topo = ClusterNode._create_topology_config("10.0.0.4:50051", "10.0.0.1:50051", ordered_ips, 1)
         
         assert topo.node_index == 3
-        assert topo.prev_node_ip == "10.0.0.3:50051"
-        assert topo.next_node_ip == ""
+        assert topo.prev_node_idx == 2
+        assert topo.next_node_idx == 4
 
     def test_missing_element_fallback(self):
         ordered_ips = ["10.0.0.1:50051", "10.0.0.2:50051", "10.0.0.3:50051", "10.0.0.4:50051"]
-        topo = ClusterNode._create_topology_config("10.0.0.9:50051", "10.0.0.1:50051", ordered_ips, 1)
-        
-        assert topo.node_index == -1
-        assert topo.prev_node_ip == ""
-        assert topo.next_node_ip == ""
+        with pytest.raises(ValueError):
+            ClusterNode._create_topology_config("10.0.0.9:50051", "10.0.0.1:50051", ordered_ips, 1)

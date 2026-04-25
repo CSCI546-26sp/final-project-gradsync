@@ -2,9 +2,32 @@ import argparse
 import time
 import torch
 import torch.nn as nn
+import json
 
-# Import your newly refactored library
 from pipeline import DistributedPipeline
+
+import asyncio
+
+import random
+import numpy as np
+
+def set_deterministic_seed(seed=42):
+    """Locks all random number generators across all hardware backends."""
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    
+    # Lock Apple Silicon (Mac Head Node)
+    if torch.backends.mps.is_available():
+        torch.mps.manual_seed(seed)
+        
+    # Lock CUDA (if you ever switch Windows back to GPU)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        
+    # Force deterministic algorithms where possible
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 # 1. Define a standard, unmodified PyTorch Model
 class MultiLayerTrans(nn.Module):
@@ -13,7 +36,7 @@ class MultiLayerTrans(nn.Module):
         # Using a ModuleList so the pipeline can easily slice it
         self.layers = nn.ModuleList([
             nn.TransformerEncoderLayer(
-                d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, batch_first=True
+                d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, batch_first=True, dropout=0.0
             ) for _ in range(num_layers)
         ])
         self.output_layer = nn.Linear(d_model, 1)
@@ -25,64 +48,109 @@ class MultiLayerTrans(nn.Module):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Test the Distributed ML Pipeline Data Path")
-    parser.add_argument('--role', type=str, required=True, choices=['head', 'tail'], help="Role of this node")
-    parser.add_argument('--target_ip', type=str, default='127.0.0.1', help="IP of the Tail node (used by Head)")
-    parser.add_argument('--port', type=int, default=50051, help="Port for gRPC communication")
+    parser = argparse.ArgumentParser(description="Auto-Electing Distributed ML Pipeline")
+    parser.add_argument('--host_ip', type=str, required=True, help="This machine's IP (e.g., 192.168.1.50)")
+    parser.add_argument("--elec_port", type=str, required=True, help="This machine's PORT (e.g., 12345)")
+    parser.add_argument("--train_port", type=str, required=True, help="This machine's PORT (e.g., 45677)")
+    parser.add_argument('--config', type=str, default='cluster.json', help="Path to cluster config file")
     args = parser.parse_args()
 
-    print(f"--- Booting as {args.role.upper()} NODE ---")
+    # 1. Load the Configuration
+    try:
+        with open(args.config, 'r') as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        print(f"Error: Could not find {args.config}. Please create it!")
+        return
+    
+    host_address = f"{args.host_ip}:{args.train_port}"
+    election_host_address = f"{args.host_ip}:{args.elec_port}"
+    
+    ell_nodes = config.get("election_nodes", [])
+    if election_host_address not in ell_nodes:
+        print(f"Warning: {election_host_address} is not listed in {args.config}!")
+    print(f"Election Nodes: {ell_nodes}")
+    
+    election_addresses = [addr for addr in ell_nodes if addr != election_host_address]
 
-    # 2. Instantiate the model
+    all_nodes = config.get("cluster_nodes", [])
+    if host_address not in all_nodes:
+        print(f"Warning: {host_address} is not listed in {args.config}!")
+    print(f"Cluster Nodes: {all_nodes}")
+    
+    peer_addresses = [addr for addr in all_nodes if addr != host_address]
+    n_micro = config.get("n_micro", 4)
+
+    print(f"--- Booting Node at {host_address} ---")
+    print(f"Peers: {peer_addresses} | Micro-batches: {n_micro}")
+
+    set_deterministic_seed(257)
     model = MultiLayerTrans(num_layers=4)
 
-    # 3. Wrap it in your library's pipeline
+    # 2. Initialize Pipeline (Blocks until Raft Election is complete)
+    print(f"Initializing pipeline and electing roles. Waiting on peers...")
     pipeline = DistributedPipeline(
         model=model,
-        role=args.role,
-        target_ip=args.target_ip,
-        port=args.port
+        host_address=host_address,
+        election_host_address = election_host_address,
+        election_addresses=election_addresses,
+        peer_addresses=peer_addresses,
+        n_micro=n_micro
     )
 
     # 4. Diverged Execution based on role
-    if args.role == 'tail':
+    if pipeline.role == 'tail' or pipeline.role == 'middle':
         # The Tail node gets trapped here, spinning up the gRPC server to listen for tensors
-        print(f"Initialization complete. Serving pipeline slice on port {args.port}...")
-        pipeline.serve_forever()
+        print(f"Initialization complete. Serving pipeline slice on port {pipeline.local_port}...")
+        pipeline.serve_forever(pipeline.local_port)
 
-    elif args.role == 'head':
+    elif pipeline.role == 'head':
         # The Head node drives the actual training loop
-        print(f"Connecting to Tail node at {args.target_ip}:{args.port}...")
+        # print(f"Connecting to Tail node at {args.target_ip}:{args.port}...")
         
-        # Generate dummy data (Batch Size: 8, Seq Len: 32, Dim: 1024)
-        print("Generating dummy dataset...")
-        dummy_inputs = torch.randn(10, 8, 32, 1024)
-        # Create a weak mathematical correlation so the loss actually decreases
-        # dummy_targets = dummy_inputs[:, :, :, 0].mean(dim=-1, keepdim=True) + torch.randn(10, 8, 32, 1) * 0.1
-        # Use 0:1 to keep the last dimension intact!
-        dummy_targets = dummy_inputs[:, :, :, 0:1] * 0.5 + torch.randn(10, 8, 32, 1) * 0.1
+        async def train_loop():
+            await pipeline._configure_remote()
+            
+            # Generate dummy data (Batch Size: 8, Seq Len: 32, Dim: 1024)
+            print("Generating dummy dataset...")
+            dummy_inputs = torch.randn(16, 8, 32, 1024)
+            # Create a weak mathematical correlation so the loss actually decreases
+            # dummy_targets = dummy_inputs[:, :, :, 0].mean(dim=-1, keepdim=True) + torch.randn(10, 8, 32, 1) * 0.1
+            # Use 0:1 to keep the last dimension intact!
+            dummy_targets = dummy_inputs[:, :, :, 0:1] * 0.5 + torch.randn(16, 8, 32, 1) * 0.1
 
-        epochs = 3
-        for epoch in range(epochs):
-            print(f"\n--- Epoch {epoch + 1}/{epochs} ---")
-            epoch_loss = 0.0
-            
-            start_time = time.time()
-            
-            for batch_idx in range(len(dummy_inputs)):
-                x = dummy_inputs[batch_idx]
-                y = dummy_targets[batch_idx]
-                
-                # The Magic Trap Door: The network pass and remote execution happen here
-                loss = pipeline.train_step(x, y)
-                epoch_loss += loss
-                
-                print(f"  Batch {batch_idx + 1}/10 | Loss: {loss:.4f}")
-            
-            end_time = time.time()
-            avg_loss = epoch_loss / len(dummy_inputs)
-            print(f"Epoch {epoch + 1} Avg Loss: {avg_loss:.4f} | Time: {end_time - start_time:.2f}s")
+            epochs = 3
 
+            for epoch in range(epochs):
+                print(f"\n--- Epoch {epoch + 1}/{epochs} ---")
+                epoch_loss = 0.0
+                
+                start_time = time.time()
+                
+                for batch_idx in range(len(dummy_inputs)):
+                    x = dummy_inputs[batch_idx]
+                    y = dummy_targets[batch_idx]
+
+                    micro_x = torch.chunk(x, chunks=n_micro, dim=0)
+                    micro_y = torch.chunk(y, chunks=n_micro, dim=0)
+
+                    pipeline.zero_grad()
+
+                    tasks = [pipeline.train_step(mx, my) for mx, my in zip(micro_x, micro_y)]
+                    micro_losses = await asyncio.gather(*tasks)
+
+                    pipeline.step()
+
+                    batch_loss = sum(micro_losses) / len(micro_losses)
+                    epoch_loss += batch_loss
+                    
+                    print(f"  Batch {batch_idx + 1}/16 | Loss: {batch_loss:.4f}")
+                
+                end_time = time.time()
+                avg_loss = epoch_loss / len(dummy_inputs)
+                print(f"Epoch {epoch + 1} Avg Loss: {avg_loss:.4f} | Time: {end_time - start_time:.2f}s")
+
+        asyncio.run(train_loop())
 
 if __name__ == '__main__':
     main()

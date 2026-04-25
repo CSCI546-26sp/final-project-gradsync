@@ -73,4 +73,3 @@ class ClusterServer(cluster_service_pb2_grpc.ClusterCoordinatorServicer):
             
         return cluster_service_pb2.Ack(ok=True)
 
-

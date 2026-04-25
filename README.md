@@ -25,9 +25,16 @@ uv sync
 ```
 
 3. Source the env 
+```bash
+# in Linux / WSL
+source ./.venv/bin/activate 
 ```
-source ./.venv/bin/activate
+
+```powershell
+# In Windows Powershell
+.\.venv\Scripts\activate
 ```
+
 
 This will:
 - Download and install all dependencies from `pyproject.toml`
