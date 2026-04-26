@@ -3,9 +3,13 @@ Utilities for device detection and configuration in distributed pipeline trainin
 """
 
 import torch
+from compression_lab import TensorCompressor, CompressionType
+import numpy as np
 
 
-WIRE_DTYPE = torch.int8  # wire format only; in-memory model stays fp32
+# WIRE_DTYPE = torch.int8  # wire format only; in-memory model stays fp32
+
+ACTIVE_COMPRESSION = CompressionType.OUTLIER_INT4
 
 
 def pack_tensor(t: torch.Tensor):
@@ -13,17 +17,39 @@ def pack_tensor(t: torch.Tensor):
     Convert a tensor to wire bytes using lower precision.
     Returns: (bytes, shape)
     """
-    t_wire = t.detach().to(dtype=WIRE_DTYPE).cpu().contiguous()
-    return t_wire.numpy().tobytes(), list(t_wire.shape)
+    # t_wire = t.detach().to(dtype=WIRE_DTYPE).cpu().contiguous()
+    # return t_wire.numpy().tobytes(), list(t_wire.shape)
+
+    shape = list(t.shape)
+    
+    # 1. Convert PyTorch tensor to raw FP32 bytes
+    tensor_bytes = t.detach().cpu().float().numpy().tobytes()
+    
+    # 2. Hand off to your OOP compressor
+    compressor = TensorCompressor(default_compression=ACTIVE_COMPRESSION)
+    compressed_bytes = compressor.compress(tensor_bytes)
+    
+    return compressed_bytes, shape
 
 
 def unpack_tensor(payload: bytes, shape, device):
     """
     Convert wire bytes back to fp32 tensor for local PyTorch use.
     """
-    t_wire = torch.frombuffer(
-        bytearray(payload), dtype=WIRE_DTYPE).reshape(shape).clone()
-    return t_wire.to(device=device, dtype=torch.float32)
+    # t_wire = torch.frombuffer(
+    #     bytearray(payload), dtype=WIRE_DTYPE).reshape(shape).clone()
+    # return t_wire.to(device=device, dtype=torch.float32)
+
+    compressor = TensorCompressor()
+    
+    # 1. Decompress back to FP32 bytes
+    decompressed_bytes = compressor.decompress(payload, ACTIVE_COMPRESSION.value)
+    
+    # 2. Convert bytes back to PyTorch tensor
+    t_np = np.frombuffer(decompressed_bytes, dtype=np.float32)
+    t_tensor = torch.frombuffer(t_np.copy(), dtype=torch.float32).reshape(shape)
+    
+    return t_tensor.to(device)
 
 
 def detect_device() -> torch.device:

@@ -11,6 +11,9 @@ import logging
 import zlib
 import pickle
 import struct
+import math
+import zstandard as zstd
+import numpy as np
 
 from enum import Enum
 
@@ -24,6 +27,8 @@ class CompressionType(Enum):
     INT8 = "int8"
     BINARY = "binary"
     SPARSE = "sparse"
+    OUTLIER_INT8 = "outlier_int8"
+    OUTLIER_INT4 = "outlier_int4"
 
 
 class TensorCompressor:
@@ -77,11 +82,18 @@ class TensorCompressor:
             elif compression_type == CompressionType.SPARSE:
                 return self._compress_sparse(tensor_bytes, compression_level)
 
+            elif compression_type == CompressionType.OUTLIER_INT8:
+                return self._compress_outlier(tensor_bytes, bits=8)
+            elif compression_type == CompressionType.OUTLIER_INT4:
+                return self._compress_outlier(tensor_bytes, bits=4)
+
             else:
-                raise ValueError(f"Unsupported compression type: {compression_type}")
+                raise ValueError(
+                    f"Unsupported compression type: {compression_type}")
 
         except Exception as e:
-            logger.warning(f"Compression failed with {compression_type}, falling back to none: {e}")
+            logger.warning(
+                f"Compression failed with {compression_type}, falling back to none: {e}")
             return tensor_bytes
 
         return tensor_bytes
@@ -121,8 +133,12 @@ class TensorCompressor:
             elif compression_type == CompressionType.SPARSE:
                 return self._decompress_sparse(compressed_bytes, original_shape)
 
+            elif compression_type in (CompressionType.OUTLIER_INT8, CompressionType.OUTLIER_INT4):
+                return self._decompress_outlier(compressed_bytes)
+
             else:
-                raise ValueError(f"Unsupported compression type: {compression_type}")
+                raise ValueError(
+                    f"Unsupported compression type: {compression_type}")
 
         except Exception as e:
             logger.error(f"Decompression failed: {e}")
@@ -147,10 +163,12 @@ class TensorCompressor:
         """Decompress fp16 compressed data."""
         # Extract header
         header_size = struct.calcsize('!II')
-        original_size, compressed_size = struct.unpack('!II', compressed_bytes[:header_size])
+        original_size, compressed_size = struct.unpack(
+            '!II', compressed_bytes[:header_size])
 
         # Convert compressed data back to float32
-        tensor_fp16 = np.frombuffer(compressed_bytes[header_size:], dtype=np.float16)
+        tensor_fp16 = np.frombuffer(
+            compressed_bytes[header_size:], dtype=np.float16)
         tensor_fp32 = tensor_fp16.astype(np.float32)
 
         return tensor_fp32.tobytes()
@@ -166,7 +184,8 @@ class TensorCompressor:
 
         # Quantize to int8 range
         if tensor_range > 0:
-            tensor_int8 = ((tensor_np - tensor_min) / tensor_range * 255 - 128).astype(np.int8)
+            tensor_int8 = ((tensor_np - tensor_min) /
+                           tensor_range * 255 - 128).astype(np.int8)
         else:
             tensor_int8 = np.zeros(len(tensor_np), dtype=np.int8)
 
@@ -194,7 +213,8 @@ class TensorCompressor:
         tensor_int8 = np.frombuffer(tensor_int8_bytes, dtype=np.int8)
 
         # Dequantize back to float32
-        tensor_fp32 = (tensor_int8.astype(np.float32) + 128) / 255 * tensor_range + tensor_min
+        tensor_fp32 = (tensor_int8.astype(np.float32) + 128) / \
+            255 * tensor_range + tensor_min
 
         return tensor_fp32.tobytes()
 
@@ -217,13 +237,16 @@ class TensorCompressor:
     def _decompress_binary(self, compressed_bytes: bytes) -> bytes:
         """Decompress binary quantized data."""
         header_size = struct.calcsize('!If')
-        original_length, tensor_abs_mean = struct.unpack('!If', compressed_bytes[:header_size])
+        original_length, tensor_abs_mean = struct.unpack(
+            '!If', compressed_bytes[:header_size])
 
         packed_bits = compressed_bytes[header_size:]
-        binary_values = np.unpackbits(np.frombuffer(packed_bits, dtype=np.uint8))[:original_length]
+        binary_values = np.unpackbits(np.frombuffer(
+            packed_bits, dtype=np.uint8))[:original_length]
 
         # Restore to +/-tensor_abs_mean
-        tensor_fp32 = np.where(binary_values, tensor_abs_mean, -tensor_abs_mean).astype(np.float32)
+        tensor_fp32 = np.where(
+            binary_values, tensor_abs_mean, -tensor_abs_mean).astype(np.float32)
 
         return tensor_fp32.tobytes()
 
@@ -242,7 +265,8 @@ class TensorCompressor:
 
         # Store sparse representation
         if len(significant_values) < len(tensor_np) * 0.8:
-            header = struct.pack('!III', len(tensor_np), len(significant_values), threshold_value)
+            header = struct.pack('!III', len(tensor_np), len(
+                significant_values), threshold_value)
             sparse_data = header + \
                 significant_indices.astype(np.uint32).tobytes() + \
                 significant_values.tobytes()
@@ -261,9 +285,11 @@ class TensorCompressor:
         original_length, num_significant, threshold_value = \
             struct.unpack('!III', sparse_data[:header_size])
 
-        indices_size = num_significant * 4 # uint32
-        indices = np.frombuffer(sparse_data[header_size:header_size+indices_size], dtype=np.uint32)
-        values = np.frombuffer(sparse_data[header_size+indices_size:], dtype=np.float32)
+        indices_size = num_significant * 4  # uint32
+        indices = np.frombuffer(
+            sparse_data[header_size:header_size+indices_size], dtype=np.uint32)
+        values = np.frombuffer(
+            sparse_data[header_size+indices_size:], dtype=np.float32)
 
         # Reconstruct original array
         tensor_fp32 = np.zeros(original_length, dtype=np.float32)
@@ -271,10 +297,109 @@ class TensorCompressor:
 
         return tensor_fp32.tobytes()
 
+    def _compress_outlier(self, tensor_bytes: bytes, bits: int = 4) -> bytes:
+        """Compress using Outlier-Aware Quantization and Zstandard."""
+        tensor_np = np.frombuffer(tensor_bytes, dtype=np.float32)
+        total_elements = tensor_np.size
+
+        # 1. Identify Outliers (3 standard deviations)
+        mean_val = np.mean(tensor_np)
+        std_val = np.std(tensor_np)
+        threshold = np.abs(mean_val) + (3.0 * std_val)
+
+        outlier_mask = np.abs(tensor_np) > threshold
+        outlier_indices = np.where(outlier_mask)[0].astype(np.uint32)
+        outlier_values = tensor_np[outlier_mask].astype(np.float16)
+
+        # 2. Quantization
+        t_min = tensor_np.min()
+        t_max = tensor_np.max()
+        buckets = (1 << bits) - 1
+        scale = (t_max - t_min + 1e-7) / float(buckets)
+
+        # Quantize remaining values to 0 -> buckets
+        quantized = np.clip(np.round((tensor_np - t_min) /
+                            scale), 0, buckets).astype(np.uint8)
+
+        # 3. Bit-Packing for INT4
+        if bits == 4:
+            # Pad if odd length
+            if total_elements % 2 != 0:
+                quantized = np.append(quantized, 0)
+
+            # Pack two 4-bit values into one 8-bit byte
+            quantized_pairs = quantized.reshape(-1, 2)
+            quant_packed = (quantized_pairs[:, 0] << 4) | quantized_pairs[:, 1]
+            quant_bytes = quant_packed.tobytes()
+        else:
+            quant_bytes = quantized.tobytes()
+
+        idx_bytes = outlier_indices.tobytes()
+        val_bytes = outlier_values.tobytes()
+
+        # 4. Header: t_min(f), t_max(f), num_outliers(I), total_elements(I), bits(B) = 17 bytes
+        header = struct.pack('!ffIIB', t_min, t_max, len(
+            outlier_indices), total_elements, bits)
+
+        # 5. Zstandard Compression
+        payload = header + quant_bytes + idx_bytes + val_bytes
+        compressor = zstd.ZstdCompressor(level=3)
+        return compressor.compress(payload)
+
+    def _decompress_outlier(self, compressed_bytes: bytes) -> bytes:
+        """Decompress Zstandard payload and restore FP32 array with precise outliers."""
+        decompressor = zstd.ZstdDecompressor()
+        raw_bytes = decompressor.decompress(compressed_bytes)
+
+        # 1. Extract Header
+        header_size = struct.calcsize('!ffIIB')
+        t_min, t_max, num_outliers, total_elements, bits = struct.unpack(
+            '!ffIIB', raw_bytes[:header_size])
+
+        # 2. Slice Arrays
+        quant_byte_len = total_elements if bits == 8 else math.ceil(
+            total_elements / 2)
+        quant_end = header_size + quant_byte_len
+        idx_end = quant_end + (num_outliers * 4)  # uint32 is 4 bytes
+
+        quant_bytes = raw_bytes[header_size:quant_end]
+        idx_bytes = raw_bytes[quant_end:idx_end]
+        val_bytes = raw_bytes[idx_end:]
+
+        # 3. Unpack Bits
+        t_quant_raw = np.frombuffer(quant_bytes, dtype=np.uint8)
+
+        if bits == 4:
+            v0 = t_quant_raw >> 4
+            v1 = t_quant_raw & 0x0F
+
+            # Interleave back into a flat array
+            t_quant = np.empty((t_quant_raw.size * 2,), dtype=np.uint8)
+            t_quant[0::2] = v0
+            t_quant[1::2] = v1
+            t_quant = t_quant[:total_elements]  # Strip padding if it was odd
+        else:
+            t_quant = t_quant_raw
+
+        # 4. Dequantize to FP32
+        buckets = (1 << bits) - 1
+        scale = (t_max - t_min + 1e-7) / float(buckets)
+        t_fp32 = t_quant.astype(np.float32) * scale + t_min
+
+        # 5. Restore Outliers
+        if num_outliers > 0:
+            indices = np.frombuffer(idx_bytes, dtype=np.uint32)
+            values = np.frombuffer(
+                val_bytes, dtype=np.float16).astype(np.float32)
+            t_fp32[indices] = values
+
+        return t_fp32.tobytes()
+
     def compute_compression_ratio(self) -> float:
         """Compute overall compression ratio across all operations."""
         if self.compression_stats['original_bytes'] > 0:
-            ratio = self.compression_stats['compressed_bytes'] / self.compression_stats['original_bytes']
+            ratio = self.compression_stats['compressed_bytes'] / \
+                self.compression_stats['original_bytes']
             self.compression_stats['compression_ratio'] = ratio * 100.0
         return self.compression_stats['compression_ratio']
 
@@ -301,19 +426,19 @@ def get_optimal_compression(tensor: torch.Tensor) -> CompressionType:
 
     # Check sparsity
     zero_ratio = np.sum(np.abs(tensor_np) < 1e-6) / tensor_np.size
-    if zero_ratio > 0.3: # More than 30% sparse
+    if zero_ratio > 0.3:  # More than 30% sparse
         return CompressionType.SPARSE
 
     # Check dynamic range
     tensor_min, tensor_max = tensor_np.min(), tensor_np.max()
     dynamic_range = (tensor_max - tensor_min) / (tensor_np.std() + 1e-6)
 
-    if dynamic_range > 100: # Very high dynamic range
+    if dynamic_range > 100:  # Very high dynamic range
         return CompressionType.INT8
 
     # Check value distribution
     unique_vals = len(np.unique(tensor_np))
-    if unique_vals < tensor_np.size * 0.1: # Highly quantized values
+    if unique_vals < tensor_np.size * 0.1:  # Highly quantized values
         return CompressionType.BINARY
 
     # Default fallback based on precision needs
@@ -345,7 +470,8 @@ def validate_tensor_compression(
         # Compress and decompress
         compressor = TensorCompressor(compression_type)
         compressed = compressor.compress(tensor_bytes)
-        decompressed = compressor.decompress(compressed, compression_type.value)
+        decompressed = compressor.decompress(
+            compressed, compression_type.value)
 
         # Convert back to tensor
         restored_tensor = torch.frombuffer(
@@ -354,27 +480,20 @@ def validate_tensor_compression(
         ).reshape(tensor.shape)
 
         # Compute reconstruction error
-        reconstruction_error = torch.abs(tensor.cpu() - restored_tensor).mean().item()
-        relative_error = reconstruction_error / (tensor.abs().mean().item() + 1e-6)
+        reconstruction_error = torch.abs(
+            tensor.cpu() - restored_tensor).mean().item()
+        relative_error = reconstruction_error / \
+            (tensor.abs().mean().item() + 1e-6)
 
         # Check if error is acceptable
         is_acceptable = relative_error < threshold
 
         # Check compression ratio
         compression_ratio = len(compressed) / len(tensor_bytes)
-        is_beneficial = compression_ratio < 0.8 # Less than 80% of original size
+        is_beneficial = compression_ratio < 0.8  # Less than 80% of original size
 
         return is_acceptable and is_beneficial
 
     except Exception as e:
         logger.error(f"Compression validation failed: {e}")
         return False
-
-
-# Export main class and utilities
-__all__ = [
-    'TensorCompressor',
-    'CompressionType',
-    'get_optimal_compression',
-    'validate_tensor_compression'
-]
