@@ -3,7 +3,6 @@ import time
 import torch
 import torch.nn as nn
 import json
-import psutil
 from pipeline import DistributedPipeline
 import asyncio
 import random

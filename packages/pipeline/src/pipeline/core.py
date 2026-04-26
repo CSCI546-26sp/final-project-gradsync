@@ -54,7 +54,12 @@ class DistributedPipeline(nn.Module):
 
         self.join_cluster(model_builder, layer_memory_reqs)
 
-        self.runner.optimizer = self.optim_class(self.parameters(), **self.optim_kwargs)
+        params = list(self.parameters())
+        if params:
+            self.runner.optimizer = self.optim_class(params, **self.optim_kwargs)
+        else:
+            print(f"[{self.host_address}] No layers assigned. Operating as pass-through relay.")
+            self.runner.optimizer = None
 
         self.start()
 
@@ -69,14 +74,6 @@ class DistributedPipeline(nn.Module):
             layer_memory_reqs.append(layer_params * 4)
             
         return layer_memory_reqs
-
-    async def _configure_remote(self):
-        is_ready = await self.runner.configure_remote(
-            start_layer=len(self.layout[0]),
-            end_layer=len(self.layout[0]) + len(self.layout[1])
-        )
-        if not is_ready:
-            print("Warning: Remote Tail Node configuration failed or timed out.")
 
     def join_cluster(self, model_builder, layer_memory_reqs):
         print(f"[{self.host_address}] Initiating Cluster Election...")
@@ -177,9 +174,7 @@ class DistributedPipeline(nn.Module):
                 sys.exit(0)
             
         elif self.role == 'head':
-            print(f"[{self.host_address}] Head Node activated. Configuring downstream connections...")
-            asyncio.run(self._configure_remote())
-            print(f"[{self.host_address}] Cluster linked! Ready for training.")
+            print(f"[{self.host_address}] Head Node activated. Cluster linked! Ready for training.")
 
     def execute_batch(self, inputs, targets):
         if self.role != 'head':
