@@ -3,6 +3,7 @@ import time
 import torch
 import torch.nn as nn
 import json
+import psutil
 from pipeline import DistributedPipeline
 import asyncio
 import random
@@ -46,12 +47,12 @@ def main():
     args = parser.parse_args()
 
     set_deterministic_seed(257)
-    model = MultiLayerTrans(num_layers=4)
+    model_builder = lambda: MultiLayerTrans(num_layers=4)
     criterion = nn.MSELoss()
 
     print(f"Initializing pipeline and electing roles. Waiting on peers...")
     pipeline = DistributedPipeline(
-        model=model,
+        model_builder=model_builder,
         criterion=criterion,
         optim_class=torch.optim.Adam,
         optim_kwargs={'lr': 0.01},

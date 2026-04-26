@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from . import cluster_service_pb2 as cluster__service__pb2
+from proto import cluster_service_pb2 as proto_dot_cluster__service__pb2
 
 GRPC_GENERATED_VERSION = '1.78.0'
 GRPC_VERSION = grpc.__version__
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in cluster_service_pb2_grpc.py depends on'
+        + ' but the generated code in proto/cluster_service_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -36,18 +36,23 @@ class ClusterCoordinatorStub(object):
         """
         self.RequestVote = channel.unary_unary(
                 '/cluster.ClusterCoordinator/RequestVote',
-                request_serializer=cluster__service__pb2.VoteRequest.SerializeToString,
-                response_deserializer=cluster__service__pb2.VoteResponse.FromString,
+                request_serializer=proto_dot_cluster__service__pb2.VoteRequest.SerializeToString,
+                response_deserializer=proto_dot_cluster__service__pb2.VoteResponse.FromString,
                 _registered_method=True)
         self.BroadcastTopology = channel.unary_unary(
                 '/cluster.ClusterCoordinator/BroadcastTopology',
-                request_serializer=cluster__service__pb2.TopologyConfig.SerializeToString,
-                response_deserializer=cluster__service__pb2.Ack.FromString,
+                request_serializer=proto_dot_cluster__service__pb2.TopologyConfig.SerializeToString,
+                response_deserializer=proto_dot_cluster__service__pb2.TopologyResponse.FromString,
+                _registered_method=True)
+        self.BroadcastPartitioning = channel.unary_unary(
+                '/cluster.ClusterCoordinator/BroadcastPartitioning',
+                request_serializer=proto_dot_cluster__service__pb2.PartitionConfig.SerializeToString,
+                response_deserializer=proto_dot_cluster__service__pb2.Ack.FromString,
                 _registered_method=True)
         self.Ping = channel.unary_unary(
                 '/cluster.ClusterCoordinator/Ping',
-                request_serializer=cluster__service__pb2.PingRequest.SerializeToString,
-                response_deserializer=cluster__service__pb2.Ack.FromString,
+                request_serializer=proto_dot_cluster__service__pb2.PingRequest.SerializeToString,
+                response_deserializer=proto_dot_cluster__service__pb2.Ack.FromString,
                 _registered_method=True)
 
 
@@ -68,6 +73,13 @@ class ClusterCoordinatorServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def BroadcastPartitioning(self, request, context):
+        """Send calculated pipeline layer boundaries to each node
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def Ping(self, request, context):
         """Synchronization barrier to verify all hosts are online before election
         """
@@ -80,18 +92,23 @@ def add_ClusterCoordinatorServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'RequestVote': grpc.unary_unary_rpc_method_handler(
                     servicer.RequestVote,
-                    request_deserializer=cluster__service__pb2.VoteRequest.FromString,
-                    response_serializer=cluster__service__pb2.VoteResponse.SerializeToString,
+                    request_deserializer=proto_dot_cluster__service__pb2.VoteRequest.FromString,
+                    response_serializer=proto_dot_cluster__service__pb2.VoteResponse.SerializeToString,
             ),
             'BroadcastTopology': grpc.unary_unary_rpc_method_handler(
                     servicer.BroadcastTopology,
-                    request_deserializer=cluster__service__pb2.TopologyConfig.FromString,
-                    response_serializer=cluster__service__pb2.Ack.SerializeToString,
+                    request_deserializer=proto_dot_cluster__service__pb2.TopologyConfig.FromString,
+                    response_serializer=proto_dot_cluster__service__pb2.TopologyResponse.SerializeToString,
+            ),
+            'BroadcastPartitioning': grpc.unary_unary_rpc_method_handler(
+                    servicer.BroadcastPartitioning,
+                    request_deserializer=proto_dot_cluster__service__pb2.PartitionConfig.FromString,
+                    response_serializer=proto_dot_cluster__service__pb2.Ack.SerializeToString,
             ),
             'Ping': grpc.unary_unary_rpc_method_handler(
                     servicer.Ping,
-                    request_deserializer=cluster__service__pb2.PingRequest.FromString,
-                    response_serializer=cluster__service__pb2.Ack.SerializeToString,
+                    request_deserializer=proto_dot_cluster__service__pb2.PingRequest.FromString,
+                    response_serializer=proto_dot_cluster__service__pb2.Ack.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -119,8 +136,8 @@ class ClusterCoordinator(object):
             request,
             target,
             '/cluster.ClusterCoordinator/RequestVote',
-            cluster__service__pb2.VoteRequest.SerializeToString,
-            cluster__service__pb2.VoteResponse.FromString,
+            proto_dot_cluster__service__pb2.VoteRequest.SerializeToString,
+            proto_dot_cluster__service__pb2.VoteResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -146,8 +163,35 @@ class ClusterCoordinator(object):
             request,
             target,
             '/cluster.ClusterCoordinator/BroadcastTopology',
-            cluster__service__pb2.TopologyConfig.SerializeToString,
-            cluster__service__pb2.Ack.FromString,
+            proto_dot_cluster__service__pb2.TopologyConfig.SerializeToString,
+            proto_dot_cluster__service__pb2.TopologyResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def BroadcastPartitioning(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cluster.ClusterCoordinator/BroadcastPartitioning',
+            proto_dot_cluster__service__pb2.PartitionConfig.SerializeToString,
+            proto_dot_cluster__service__pb2.Ack.FromString,
             options,
             channel_credentials,
             insecure,
@@ -173,8 +217,8 @@ class ClusterCoordinator(object):
             request,
             target,
             '/cluster.ClusterCoordinator/Ping',
-            cluster__service__pb2.PingRequest.SerializeToString,
-            cluster__service__pb2.Ack.FromString,
+            proto_dot_cluster__service__pb2.PingRequest.SerializeToString,
+            proto_dot_cluster__service__pb2.Ack.FromString,
             options,
             channel_credentials,
             insecure,

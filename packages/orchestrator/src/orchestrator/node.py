@@ -22,12 +22,14 @@ class ClusterNode:
         self.host_ip = host_ip if ":" in host_ip else f"{host_ip}:{port}"
         self.peer_ips = [p if ":" in p else f"{p}:{port}" for p in peer_ips]
         self.port = port
+        self.peer_capacities = {}
         self.state = NodeState.FOLLOWER
         self.current_term = 0
         self.voted_for = None    # candidate_ip this node voted for in current term
         self.votes_received = 0
         self.coordinator_ip = None
         self.topology_config = None
+        self.partition_config = None
         self.server = None
         self._election_cv = threading.Condition()  # used to sleep until timeout (or future heartbeat)
 
@@ -133,7 +135,14 @@ class ClusterNode:
                         peer_ip = futures[future]
                         print(f"[{self.host_ip}] Failed to get vote from {peer_ip}. Re-trying next cycle.")
         
-        return self.topology_config
+        return self.topology_config, self.peer_capacities
+
+    def wait_for_partitioning(self):
+        """Blocks until the Leader sends the layer partition boundaries."""
+        with self._election_cv:
+            while self.partition_config is None:
+                self._election_cv.wait()
+        return self.partition_config
 
     def shutdown(self):
         """Cleanly stop the gRPC server."""
@@ -205,14 +214,17 @@ class ClusterNode:
 
         # Broadcast to all peers concurrently
         with ThreadPoolExecutor(max_workers=max(1, len(self.peer_ips))) as executor:
-            futures = [
-                executor.submit(self.send_topology, peer, self.host_ip, ordered_ips, self.current_term)
+            futures = {
+                executor.submit(self.send_topology, peer, self.host_ip, ordered_ips, self.current_term): peer
                 for peer in self.peer_ips
-            ]
+            }
             
             for future in as_completed(futures):
+                peer = futures[future]
                 try:
-                    if future.result():
+                    ok, capacity = future.result()
+                    if ok:
+                        self.peer_capacities[peer] = capacity
                         successes += 1
                         check_majority()
                 except Exception as e:
@@ -224,7 +236,7 @@ class ClusterNode:
                 self.state = NodeState.FOLLOWER
                 self.voted_for = None
 
-    def send_topology(self, peer_ip: str, coordinator_ip: str, ordered_ips: list[str], term: int) -> bool:
+    def send_topology(self, peer_ip: str, coordinator_ip: str, ordered_ips: list[str], term: int) -> tuple[bool, int]:
         """Sends BroadcastTopology to peer_ip."""
         client = ClusterClient(target_ip=peer_ip, port=self.port)
         try:
@@ -251,3 +263,33 @@ class ClusterNode:
             prev_node_idx=prev_idx,
             next_node_idx=next_idx
         )
+
+    def broadcast_partitioning(self, allocations: dict):
+        """Called by LEADER to send specific layer boundaries to each node."""
+        if self.state != NodeState.LEADER:
+            return
+            
+        with self._election_cv:
+            # Set our own config
+            my_alloc = allocations.get(self.host_ip)
+            if my_alloc:
+                self.partition_config = cluster_service_pb2.PartitionConfig(
+                    start_layer_idx=my_alloc['start'],
+                    end_layer_idx=my_alloc['end']
+                )
+
+        with ThreadPoolExecutor(max_workers=max(1, len(self.peer_ips))) as executor:
+            for peer in self.peer_ips:
+                if peer in allocations:
+                    executor.submit(self.send_partitioning, peer, allocations[peer])
+
+    def send_partitioning(self, peer_ip: str, alloc: dict) -> bool:
+        client = ClusterClient(target_ip=peer_ip, port=self.port)
+        try:
+            config = cluster_service_pb2.PartitionConfig(
+                start_layer_idx=alloc['start'],
+                end_layer_idx=alloc['end']
+            )
+            return client.broadcast_partitioning(config)
+        finally:
+            client.close()

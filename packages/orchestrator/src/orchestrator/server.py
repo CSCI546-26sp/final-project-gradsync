@@ -2,6 +2,7 @@ import grpc
 from concurrent import futures
 from .proto import cluster_service_pb2
 from .proto import cluster_service_pb2_grpc
+import psutil
 
 
 class ClusterServer(cluster_service_pb2_grpc.ClusterCoordinatorServicer):
@@ -50,13 +51,18 @@ class ClusterServer(cluster_service_pb2_grpc.ClusterCoordinatorServicer):
 
     def BroadcastTopology(self, request, context):
         with self.node._election_cv:
+            capacity = psutil.virtual_memory().available
+            # Record our own capacity in peer_capacities so the Leader sees it when returning from join_cluster
+            if self.node.state == type(self.node.state).LEADER:
+                self.node.peer_capacities[self.node.host_ip] = capacity
+                
             # If we already finalized the cluster topology, ignore duplicates
             if self.node.topology_config is not None:
-                return cluster_service_pb2.Ack(ok=True)
+                return cluster_service_pb2.TopologyResponse(ok=True, available_memory_bytes=capacity)
 
             # Reject topology if it comes from an older leader
             if request.term < self.node.current_term:
-                return cluster_service_pb2.Ack(ok=False)
+                return cluster_service_pb2.TopologyResponse(ok=False, available_memory_bytes=capacity)
 
             # If leader has a newer term, update ourselves
             if request.term > self.node.current_term:
@@ -71,5 +77,12 @@ class ClusterServer(cluster_service_pb2_grpc.ClusterCoordinatorServicer):
             # Wake up the main thread waiting in join_cluster()
             self.node._election_cv.notify_all()
             
+        return cluster_service_pb2.TopologyResponse(ok=True, available_memory_bytes=capacity)
+
+    def BroadcastPartitioning(self, request, context):
+        with self.node._election_cv:
+            self.node.partition_config = request
+            print(f"[{self.node.host_ip}] Received layer partition boundaries: start={request.start_layer_idx}, end={request.end_layer_idx}")
+            self.node._election_cv.notify_all()
         return cluster_service_pb2.Ack(ok=True)
 
