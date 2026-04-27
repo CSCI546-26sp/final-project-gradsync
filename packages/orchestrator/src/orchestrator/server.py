@@ -3,6 +3,7 @@ from concurrent import futures
 from .proto import cluster_service_pb2
 from .proto import cluster_service_pb2_grpc
 import psutil
+import torch
 
 
 class ClusterServer(cluster_service_pb2_grpc.ClusterCoordinatorServicer):
@@ -51,7 +52,11 @@ class ClusterServer(cluster_service_pb2_grpc.ClusterCoordinatorServicer):
 
     def BroadcastTopology(self, request, context):
         with self.node._election_cv:
-            capacity = psutil.virtual_memory().available
+            if torch.cuda.is_available():
+                free_vram, _ = torch.cuda.mem_get_info()
+                capacity = free_vram
+            else:
+                capacity = psutil.virtual_memory().available
             # Record our own capacity in peer_capacities so the Leader sees it when returning from join_cluster
             if self.node.state == type(self.node.state).LEADER:
                 self.node.peer_capacities[self.node.host_ip] = capacity
