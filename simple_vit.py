@@ -20,8 +20,8 @@ def set_deterministic_seed(seed=42):
     torch.backends.cudnn.benchmark = False
 
 class PureTransformer(nn.Module):
-    def _init_(self, num_layers=12, d_model=768, nhead=12):
-        super()._init_()
+    def __init__(self, num_layers=12, d_model=768, nhead=12):
+        super().__init__()
         
         self.layers = nn.ModuleList()
         
@@ -107,5 +107,5 @@ def main():
         avg_loss = epoch_loss / (len(full_images) // batch_size)
         print(f"Epoch {epoch + 1} Avg Loss: {avg_loss:.4f} | Time: {end_time - start_time:.2f}s")
 
-if __name__ == '_main_':
+if __name__ == '__main__':
     main()

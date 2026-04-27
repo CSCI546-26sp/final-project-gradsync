@@ -3,6 +3,7 @@ from concurrent import futures
 from .proto import cluster_service_pb2
 from .proto import cluster_service_pb2_grpc
 from common.hardware import get_available_memory
+from .states import NodeState
 
 
 class ClusterServer(cluster_service_pb2_grpc.ClusterCoordinatorServicer):
@@ -31,8 +32,7 @@ class ClusterServer(cluster_service_pb2_grpc.ClusterCoordinatorServicer):
             # Rule 1: Step down if candidate has a stricter/higher term
             if request.term > self.node.current_term:
                 self.node.current_term = request.term
-                # Resolving the FOLLOWER enum type dynamically to avoid circular import!
-                self.node.state = type(self.node.state).FOLLOWER
+                self.node._set_state(NodeState.FOLLOWER)
                 self.node.voted_for = None
                 self.node._election_cv.notify_all()
             
@@ -40,7 +40,7 @@ class ClusterServer(cluster_service_pb2_grpc.ClusterCoordinatorServicer):
             vote_granted = False
             if request.term == self.node.current_term:
                 if self.node.voted_for is None or self.node.voted_for == request.candidate_ip:
-                    self.node.state = type(self.node.state).FOLLOWER
+                    self.node._set_state(NodeState.FOLLOWER)
                     self.node.voted_for = request.candidate_ip
                     vote_granted = True
                     print(f"[{self.node.host_ip}] Granted vote to {request.candidate_ip} (term {self.node.current_term})")
@@ -69,12 +69,12 @@ class ClusterServer(cluster_service_pb2_grpc.ClusterCoordinatorServicer):
             # If leader has a newer term, update ourselves
             if request.term > self.node.current_term:
                 self.node.current_term = request.term
-                self.node.state = type(self.node.state).FOLLOWER
+                self.node._set_state(NodeState.FOLLOWER)
                 self.node.voted_for = None
 
             self.node.topology_config = request
             self.node.coordinator_ip = request.coordinator_ip
-            self.node.state = type(self.node.state).FOLLOWER
+            self.node._set_state(NodeState.FOLLOWER)
             print(f"[{self.node.host_ip}] Received cluster topology! Coordinator is {self.node.coordinator_ip}")
             # Wake up the main thread waiting in join_cluster()
             self.node._election_cv.notify_all()
