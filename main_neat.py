@@ -46,7 +46,7 @@ def main():
     args = parser.parse_args()
 
     set_deterministic_seed(257)
-    model_builder = lambda: MultiLayerTrans(num_layers=4)
+    model_builder = lambda: MultiLayerTrans(num_layers=16)
     criterion = nn.MSELoss()
 
     print(f"Initializing pipeline and electing roles. Waiting on peers...")

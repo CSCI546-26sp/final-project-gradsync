@@ -89,18 +89,32 @@ class DistributedPipeline(nn.Module):
             # Leader computes partition boundaries
             allocations = {}
             current_layer = 0
+            memory_ip = []
             for ip in topology.ordered_node_ips:
                 start_idx = current_layer
                 cap = capacities.get(ip, float('inf'))
+
+                memory_ip.append((ip, cap))
+
+            ratios = torch.tensor([cap for _, cap in memory_ip])
+            ratios = ratios / ratios.sum()
+            layer_memory_reqs_tensor = torch.tensor(layer_memory_reqs)
+            cumulative_memory = torch.cumsum(layer_memory_reqs_tensor, dim=0)
+            mem_alloc = ratios * cumulative_memory[-1]  
+            mem_alloc = torch.cumsum(mem_alloc, dim=0)
+
+
+            for i in range(len(topology.ordered_node_ips)):  
+                start_idx = current_layer
                 
-                while current_layer < total_layers and cap >= layer_memory_reqs[current_layer]:
-                    cap -= layer_memory_reqs[current_layer]
+                while cumulative_memory[current_layer] < mem_alloc[i] and current_layer < total_layers:
                     current_layer += 1
                     
-                if start_idx == current_layer and current_layer < total_layers:
-                    current_layer += 1
+                # if start_idx == current_layer and current_layer < total_layers:
+                #     current_layer += 1
                     
                 allocations[ip] = {'start': start_idx, 'end': current_layer}
+            print(f"Layer Allocations: {allocations}")
             
             if current_layer < total_layers:
                 print(f"WARNING: Cluster Out of Memory! Could only fit {current_layer}/{total_layers} layers.")
