@@ -580,6 +580,7 @@ name = "pipeline"
 version = "0.1.0"
 source = { editable = "packages/pipeline" }
 dependencies = [
+    { name = "common" },
     { name = "comms" },
     { name = "numpy" },
     { name = "torch" },
@@ -589,6 +590,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "common", editable = "packages/common" },
     { name = "comms", editable = "packages/comms" },
     { name = "numpy", specifier = ">=2.4.3" },
     { name = "torch", specifier = "==2.7.1" },

@@ -7,6 +7,7 @@ from orchestrator.node import ClusterNode
 import time
 import json
 import asyncio
+from common.hardware import get_available_memory
 
 class DistributedPipeline(nn.Module):
     def __init__(self, model_builder, criterion: nn.Module, optim_class, optim_kwargs: dict, host_ip: str, elec_port: str, train_port: str, config_path: str):
@@ -79,6 +80,7 @@ class DistributedPipeline(nn.Module):
         print(f"[{self.host_address}] Initiating Cluster Election...")
         node = ClusterNode(host_ip=self.election_host_address, peer_ips=self.election_addresses)
         topology, capacities = node.join_cluster()
+        print(capacities)
 
         idx = topology.node_index
         total_nodes = len(topology.ordered_node_ips)
@@ -92,7 +94,11 @@ class DistributedPipeline(nn.Module):
             memory_ip = []
             for ip in topology.ordered_node_ips:
                 start_idx = current_layer
-                cap = capacities.get(ip, float('inf'))
+                
+                if ip not in capacities and ip == self.election_host_address:
+                    cap = get_available_memory()
+                else:
+                    cap = capacities.get(ip, float('inf'))
 
                 memory_ip.append((ip, cap))
 
@@ -103,21 +109,24 @@ class DistributedPipeline(nn.Module):
             mem_alloc = ratios * cumulative_memory[-1]  
             mem_alloc = torch.cumsum(mem_alloc, dim=0)
 
-
+            print(ratios, mem_alloc, cumulative_memory)
             for i in range(len(topology.ordered_node_ips)):  
+                ip = topology.ordered_node_ips[i]
                 start_idx = current_layer
                 
-                while cumulative_memory[current_layer] < mem_alloc[i] and current_layer < total_layers:
+                while current_layer <= total_layers and cumulative_memory[current_layer] < mem_alloc[i]:
                     current_layer += 1
-                    
-                # if start_idx == current_layer and current_layer < total_layers:
-                #     current_layer += 1
-                    
+                
+                if current_layer == total_layers - 1:
+                    current_layer += 1
+
                 allocations[ip] = {'start': start_idx, 'end': current_layer}
             print(f"Layer Allocations: {allocations}")
             
-            if current_layer < total_layers:
-                print(f"WARNING: Cluster Out of Memory! Could only fit {current_layer}/{total_layers} layers.")
+            try:
+                assert current_layer == total_layers
+            except AssertionError:
+                raise AssertionError(f"FATAL: Cluster Out of Memory! Could only fit {current_layer}/{total_layers} layers.")
 
             node.broadcast_partitioning(allocations)
             partition_config = node.partition_config
