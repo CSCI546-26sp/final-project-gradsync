@@ -46,7 +46,7 @@ def main():
     args = parser.parse_args()
 
     set_deterministic_seed(257)
-    model_builder = lambda: MultiLayerTrans(num_layers=16)
+    model_builder = lambda: MultiLayerTrans(num_layers=8)
     criterion = nn.MSELoss()
 
     print(f"Initializing pipeline and electing roles. Waiting on peers...")
@@ -65,7 +65,7 @@ def main():
     dummy_inputs = torch.randn(16, 8, 32, 1024)
     dummy_targets = dummy_inputs[:, :, :, 0:1] * 0.5 + torch.randn(16, 8, 32, 1) * 0.1
 
-    epochs = 3
+    epochs = 100
 
     for epoch in range(epochs):
         print(f"\n--- Epoch {epoch + 1}/{epochs} ---")

@@ -47,14 +47,16 @@ def main():
     parser.add_argument('--config', type=str, default='cluster.json')
     args = parser.parse_args()
 
+    print("Loading HuggingFace model...")
     model_name = "HuggingFaceTB/SmolLM-360M"
     hf_model = AutoModelForCausalLM.from_pretrained(model_name)
     
-    model = DistributedSmolLM(hf_model)
+    print("Initializing pipeline and electing roles. Waiting on peers...")
+    model_builder = lambda: DistributedSmolLM(hf_model)
     criterion = DistributedCausalLoss()
 
     pipeline = DistributedPipeline(
-        model=model,
+        model_builder=model_builder,
         criterion=criterion,
         optim_class=torch.optim.Adam,
         optim_kwargs={'lr': 0.001},
@@ -64,8 +66,11 @@ def main():
         config_path=args.config
     )
 
+    print("Setting up tokenizer and dataset...")
+
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token = tokenizer.eos_token
+    print("Loading dataset...")
 
     dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
     texts = [text for text in dataset['text'] if len(text) > 50]

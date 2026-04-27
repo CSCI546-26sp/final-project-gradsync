@@ -5,7 +5,7 @@ Utilities for device detection and configuration in distributed pipeline trainin
 import torch
 
 
-WIRE_DTYPE = torch.int8  # wire format only; in-memory model stays fp32
+WIRE_DTYPE = torch.float32  # wire format only; in-memory model stays fp32
 
 
 def pack_tensor(t: torch.Tensor):

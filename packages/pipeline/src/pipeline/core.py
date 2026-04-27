@@ -9,6 +9,8 @@ import json
 import asyncio
 from common.hardware import get_available_memory
 
+from telemetry.server import start_telemetry_server
+
 class DistributedPipeline(nn.Module):
     def __init__(self, model_builder, criterion: nn.Module, optim_class, optim_kwargs: dict, host_ip: str, elec_port: str, train_port: str, config_path: str):
         super().__init__()
@@ -157,14 +159,15 @@ class DistributedPipeline(nn.Module):
             next_port = int(next_port_str)
 
         if self.role == 'head':
-            self.runner = HeadNodeRunner(my_slice, target_ip=next_ip, port=next_port, device=self.device)
+            self.runner = HeadNodeRunner(my_slice, target_ip=next_ip, port=next_port, device=self.device, coordinator_ip=topology.coordinator_ip, node_id=idx)
+            start_telemetry_server(port=8080, udp_port=8081)  # Start telemetry server for head node
         elif self.role == 'tail':
             if hasattr(real_model, 'output_layer'):
                 my_slice.append(real_model.output_layer)
-            self.runner = TailNodeRunner(my_slice, device=self.device, criterion=self.criterion, n_micro=self.n_micro)
+            self.runner = TailNodeRunner(my_slice, device=self.device, criterion=self.criterion, n_micro=self.n_micro, coordinator_ip=topology.coordinator_ip, node_id=idx)
             self.serve_port = self.local_port 
         else:
-            self.runner = MiddleNodeRunner(my_slice, target_ip=next_ip, port=next_port, device=self.device, n_micro=self.n_micro)
+            self.runner = MiddleNodeRunner(my_slice, target_ip=next_ip, port=next_port, device=self.device, n_micro=self.n_micro, coordinator_ip=topology.coordinator_ip, node_id=idx)
             self.serve_port = self.local_port
 
         print(f"[{self.host_address}] Assigned Role: {self.role.upper()} | Layers: {start_layer} to {end_layer}")

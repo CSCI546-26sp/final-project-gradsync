@@ -53,7 +53,7 @@ class PipelineClient:
         request_proto_bytes = len(request.SerializeToString())
 
         # print(f"request_tensor_bytes: {request_tensor_bytes}")
-        print(f"request_proto_bytes: {request_proto_bytes}")
+        # print(f"request_proto_bytes: {request_proto_bytes}")
 
         try:
             response = await self.stub.ExecutePipelineStage(request)
@@ -62,7 +62,7 @@ class PipelineClient:
             response_proto_bytes = len(response.SerializeToString())
             response_tensor_bytes = len(response.gradient_bytes)
 
-            print(f"response_proto_bytes: {response_proto_bytes}")
+            # print(f"response_proto_bytes: {response_proto_bytes}")
             # print(f"response_tensor_bytes: {response_tensor_bytes}")
 
             return response.gradient_bytes, list(response.gradient_shape), response.loss_value
