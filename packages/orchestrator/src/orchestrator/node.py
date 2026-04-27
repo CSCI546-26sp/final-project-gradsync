@@ -65,6 +65,9 @@ class ClusterNode:
 
             with self._election_cv:
                 notified = self._election_cv.wait(timeout=election_timeout)
+
+                if self.topology_config is not None:
+                    break
                 
                 if notified or self.state == NodeState.LEADER:
                     # Woken up by incoming BroadcastTopology (which sets topology_config),
@@ -84,18 +87,19 @@ class ClusterNode:
 
                 # Immediately check if majority is met (handles 1-node cluster zero-peer case)
                 total_nodes = len(self.peer_ips) + 1
+                print(f"[{self.host_ip}] Total nodes: {total_nodes}, Votes received: {self.votes_received}")
+                is_leader_now = False
                 if self.votes_received > total_nodes // 2:
                     self.state = NodeState.LEADER
                     print(f"[{self.host_ip}] Elected LEADER for term {self.current_term}!")
+                    is_leader_now = True
 
             # --- LOCK RELEASED ---
-            
-            if self.state == NodeState.LEADER:
+
+            if is_leader_now:
                 self.broadcast_topology()
                 continue
 
-            # Do not hold the lock while making blocking network calls.
-            
             if self.state != NodeState.CANDIDATE:
                 continue
             print(f"[{self.host_ip}] Requesting votes from peers: {self.peer_ips}")

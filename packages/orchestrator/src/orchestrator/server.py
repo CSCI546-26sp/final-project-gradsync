@@ -18,9 +18,11 @@ class ClusterServer(cluster_service_pb2_grpc.ClusterCoordinatorServicer):
         return cluster_service_pb2.Ack(ok=True)
 
     def RequestVote(self, request, context):
+        print(f"[{self.node.host_ip}] Candidate {request.candidate_ip} requesting vote for term {request.term}. Current state {self.node.state} in term {self.node.current_term}")
         with self.node._election_cv:
             # If we already finalized the cluster topology, the election is permanently over.
             if self.node.topology_config is not None:
+                print(f"[{self.node.host_ip}] Topology already finalized, rejecting vote for {request.candidate_ip}")
                 return cluster_service_pb2.VoteResponse(
                     term=self.node.current_term,
                     vote_granted=False

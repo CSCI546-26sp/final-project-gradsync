@@ -41,6 +41,8 @@ class DistributedPipeline(nn.Module):
         
         self.peer_addresses = [addr for addr in raw_cluster if addr != self.host_address]
         self.n_micro = config.get("n_micro", 4)
+        
+        self.elec_to_data_map = dict(zip(raw_election, raw_cluster))
     
         print(f"Peers: {self.peer_addresses} | Micro-batches: {self.n_micro}")
         
@@ -148,9 +150,10 @@ class DistributedPipeline(nn.Module):
 
         # Parse next node details
         next_ip, next_port = None, None
-        if topology.next_node_idx >= 0 and topology.next_node_idx < len(self.peer_addresses):
-            next_node_address = self.peer_addresses[topology.next_node_idx]
-            next_ip, next_port_str = next_node_address.split(':')
+        if topology.next_node_idx >= 0 and topology.next_node_idx < len(topology.ordered_node_ips):
+            next_elec_ip = topology.ordered_node_ips[topology.next_node_idx]
+            next_data_ip = self.elec_to_data_map[next_elec_ip]
+            next_ip, next_port_str = next_data_ip.split(':')
             next_port = int(next_port_str)
 
         if self.role == 'head':
