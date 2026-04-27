@@ -27,6 +27,16 @@ wheels = [
 name = "common"
 version = "0.1.0"
 source = { editable = "packages/common" }
+dependencies = [
+    { name = "psutil" },
+    { name = "torch" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "psutil", specifier = ">=5.9.0" },
+    { name = "torch", specifier = ">=2.0.0" },
+]
 
 [[package]]
 name = "comms"
@@ -475,16 +485,16 @@ name = "orchestrator"
 version = "0.1.0"
 source = { editable = "packages/orchestrator" }
 dependencies = [
+    { name = "common" },
     { name = "grpcio" },
     { name = "grpcio-tools" },
-    { name = "psutil" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "common", editable = "packages/common" },
     { name = "grpcio", specifier = ">=1.60.0" },
     { name = "grpcio-tools", specifier = ">=1.60.0" },
-    { name = "psutil", specifier = ">=5.9.0" },
 ]
 
 [[package]]
