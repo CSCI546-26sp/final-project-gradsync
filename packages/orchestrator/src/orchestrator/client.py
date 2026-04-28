@@ -33,7 +33,7 @@ class ClusterClient:
         """
         try:
             # 1.0s timeout for topology dissemination
-            response = self.stub.BroadcastTopology(topology, timeout=1.0)
+            response = self.stub.BroadcastTopology(topology, timeout=10.0)
             return response.ok, response.available_memory_bytes
         except grpc.RpcError:
             return False, 0
@@ -43,7 +43,7 @@ class ClusterClient:
         Sends BroadcastPartitioning gRPC to the target peer.
         """
         try:
-            response = self.stub.BroadcastPartitioning(config, timeout=1.0)
+            response = self.stub.BroadcastPartitioning(config, timeout=10.0)
             return response.ok
         except grpc.RpcError:
             return False

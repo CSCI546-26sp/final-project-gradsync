@@ -51,7 +51,9 @@ class ClusterNode:
         cluster_service_pb2_grpc.add_ClusterCoordinatorServicer_to_server(
             ClusterServer(self), server
         )
-        bound_port = server.add_insecure_port(self.host_ip)
+        bind_ip = f"0.0.0.0:{self.host_ip.split(":")[-1]}"
+        print(f"Starting Orchestrator on {bind_ip}")
+        bound_port = server.add_insecure_port(bind_ip)
         if bound_port == 0:
             raise RuntimeError(f"Failed to bind to {self.host_ip}. The port is likely already in use by another process.")
             

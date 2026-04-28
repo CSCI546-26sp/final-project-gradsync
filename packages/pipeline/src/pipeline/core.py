@@ -11,6 +11,38 @@ from common.hardware import get_available_memory
 
 from telemetry.server import start_telemetry_server
 
+
+def _ensure_unique_endpoints(endpoints: list[str], field_name: str) -> None:
+    duplicates = sorted({endpoint for endpoint in endpoints if endpoints.count(endpoint) > 1})
+    if duplicates:
+        raise ValueError(f"Invalid config: duplicate entries in {field_name}: {duplicates}")
+
+def validate_cluster_config(
+    election_nodes: list[str],
+    cluster_nodes: list[str],
+    election_host_address: str,
+    host_address: str,
+) -> None:
+    if len(election_nodes) != len(cluster_nodes):
+        raise ValueError(
+            "Invalid config: election_nodes and cluster_nodes must have the same length "
+            f"(got {len(election_nodes)} and {len(cluster_nodes)})"
+        )
+
+    _ensure_unique_endpoints(election_nodes, "election_nodes")
+    _ensure_unique_endpoints(cluster_nodes, "cluster_nodes")
+
+    if election_host_address not in election_nodes:
+        raise ValueError(
+            f"Invalid config: local election endpoint {election_host_address} is not listed in election_nodes"
+        )
+
+    if host_address not in cluster_nodes:
+        raise ValueError(
+            f"Invalid config: local data endpoint {host_address} is not listed in cluster_nodes"
+        )
+
+
 class DistributedPipeline(nn.Module):
     def __init__(self, model_builder, criterion: nn.Module, optim_class, optim_kwargs: dict, host_ip: str, elec_port: str, train_port: str, config_path: str):
         super().__init__()
@@ -30,17 +62,20 @@ class DistributedPipeline(nn.Module):
         self.election_host_address = f"{host_ip}:{elec_port}"
         
         raw_election = config.get("election_nodes", [])
-        if self.election_host_address not in raw_election:
-            print(f"Warning: {self.election_host_address} is not listed in {config_path}!")
+       
         print(f"Election Nodes: {raw_election}")
         
-        self.election_addresses = [addr for addr in raw_election if addr != self.election_host_address]
 
         raw_cluster = config.get("cluster_nodes", [])
-        if self.host_address not in raw_cluster:
-            print(f"Warning: {self.host_address} is not listed in {config_path}!")
         print(f"Cluster Nodes: {raw_cluster}")
-        
+        validate_cluster_config(
+            raw_election,
+            raw_cluster,
+            self.election_host_address,
+            self.host_address,
+        )
+
+        self.election_addresses = [addr for addr in raw_election if addr != self.election_host_address]
         self.peer_addresses = [addr for addr in raw_cluster if addr != self.host_address]
         self.n_micro = config.get("n_micro", 4)
         
@@ -65,7 +100,8 @@ class DistributedPipeline(nn.Module):
         else:
             print(f"[{self.host_address}] No layers assigned. Operating as pass-through relay.")
             self.runner.optimizer = None
-
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
         self.start()
 
     def _meta_profile(self, model_builder):
@@ -90,6 +126,8 @@ class DistributedPipeline(nn.Module):
         total_nodes = len(topology.ordered_node_ips)
         total_layers = len(layer_memory_reqs)
 
+        self.pipeline_depth = total_nodes
+
         if idx == 0:
             self.role = 'head'
             # Leader computes partition boundaries
@@ -102,7 +140,8 @@ class DistributedPipeline(nn.Module):
                 if ip not in capacities and ip == self.election_host_address:
                     cap = get_available_memory()
                 else:
-                    cap = capacities.get(ip, float('inf'))
+                    # FIX: Use a safe default (e.g., 8GB) instead of float('inf') to prevent NaN tensors
+                    cap = capacities.get(ip, 100 * 1024**3) 
 
                 memory_ip.append((ip, cap))
 
@@ -123,6 +162,8 @@ class DistributedPipeline(nn.Module):
                 
                 if current_layer == total_layers - 1:
                     current_layer += 1
+                
+                current_layer = max(current_layer, start_idx + 1)
 
                 allocations[ip] = {'start': start_idx, 'end': current_layer}
             print(f"Layer Allocations: {allocations}")
@@ -158,16 +199,18 @@ class DistributedPipeline(nn.Module):
             next_ip, next_port_str = next_data_ip.split(':')
             next_port = int(next_port_str)
 
+        telemetry_ip = topology.ordered_node_ips[0] if topology.ordered_node_ips else topology.coordinator_ip
+
         if self.role == 'head':
-            self.runner = HeadNodeRunner(my_slice, target_ip=next_ip, port=next_port, device=self.device, coordinator_ip=topology.coordinator_ip, node_id=idx)
+            self.runner = HeadNodeRunner(my_slice, target_ip=next_ip, port=next_port, device=self.device, coordinator_ip=topology.coordinator_ip, node_id=idx, telemetry_ip=telemetry_ip)
             start_telemetry_server(port=8080, udp_port=8081)  # Start telemetry server for head node
         elif self.role == 'tail':
             if hasattr(real_model, 'output_layer'):
                 my_slice.append(real_model.output_layer)
-            self.runner = TailNodeRunner(my_slice, device=self.device, criterion=self.criterion, n_micro=self.n_micro, coordinator_ip=topology.coordinator_ip, node_id=idx)
+            self.runner = TailNodeRunner(my_slice, device=self.device, criterion=self.criterion, n_micro=self.n_micro, coordinator_ip=topology.coordinator_ip, node_id=idx, telemetry_ip=telemetry_ip)
             self.serve_port = self.local_port 
         else:
-            self.runner = MiddleNodeRunner(my_slice, target_ip=next_ip, port=next_port, device=self.device, n_micro=self.n_micro, coordinator_ip=topology.coordinator_ip, node_id=idx)
+            self.runner = MiddleNodeRunner(my_slice, target_ip=next_ip, port=next_port, device=self.device, n_micro=self.n_micro, coordinator_ip=topology.coordinator_ip, node_id=idx, telemetry_ip=telemetry_ip)
             self.serve_port = self.local_port
 
         print(f"[{self.host_address}] Assigned Role: {self.role.upper()} | Layers: {start_layer} to {end_layer}")
@@ -208,7 +251,7 @@ class DistributedPipeline(nn.Module):
     def execute_batch(self, inputs, targets):
         if self.role != 'head':
             raise RuntimeError("Only the head node can execute training batches.")
-        return asyncio.run(self._async_execute_batch(inputs, targets))
+        return self._loop.run_until_complete(self._async_execute_batch(inputs, targets))
 
     async def _async_execute_batch(self, inputs, targets):
         micro_x = torch.chunk(inputs, chunks=self.n_micro, dim=0)
@@ -216,7 +259,18 @@ class DistributedPipeline(nn.Module):
 
         self.zero_grad()
 
-        tasks = [self.train_step(mx, my) for mx, my in zip(micro_x, micro_y)]
+                # Dynamically limit concurrency based on the active cluster size
+        # If 4 laptops join the cluster, this automatically allows 4 concurrent micro-batches
+        semaphore = asyncio.Semaphore(self.pipeline_depth)
+
+
+        async def bounded_train_step(mx, my):
+            # Wait for a previous batch to clear the node before sending the next
+            async with semaphore:
+                return await self.train_step(mx, my)
+
+        # Launch the bounded tasks
+        tasks = [bounded_train_step(mx, my) for mx, my in zip(micro_x, micro_y)]
         micro_losses = await asyncio.gather(*tasks)
 
         self.step()

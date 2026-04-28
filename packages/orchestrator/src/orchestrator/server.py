@@ -54,32 +54,21 @@ class ClusterServer(cluster_service_pb2_grpc.ClusterCoordinatorServicer):
     def BroadcastTopology(self, request, context):
         with self.node._election_cv:
             capacity = get_available_memory()
-            # Record our own capacity in peer_capacities so the Leader sees it when returning from join_cluster
             if self.node.state == type(self.node.state).LEADER:
                 self.node.peer_capacities[self.node.host_ip] = capacity
                 
-            # If we already finalized the cluster topology, ignore duplicates
-            if self.node.topology_config is not None:
+            # FIX: If we have no topology yet, accept it immediately to break race conditions
+            if self.node.topology_config is None:
+                self.node.topology_config = request
+                self.node.coordinator_ip = request.coordinator_ip
+                self.node._set_state(NodeState.FOLLOWER)
+                self.node._election_cv.notify_all()
+                print(f"[{self.node.host_ip}] Received initial cluster topology! Coordinator is {self.node.coordinator_ip}")
                 return cluster_service_pb2.TopologyResponse(ok=True, available_memory_bytes=capacity)
 
-            # Reject topology if it comes from an older leader
+            # (Leave your existing logic below for rejecting older terms if a topology was somehow already set)
             if request.term < self.node.current_term:
                 return cluster_service_pb2.TopologyResponse(ok=False, available_memory_bytes=capacity)
-
-            # If leader has a newer term, update ourselves
-            if request.term > self.node.current_term:
-                self.node.current_term = request.term
-                self.node._set_state(NodeState.FOLLOWER)
-                self.node.voted_for = None
-
-            self.node.topology_config = request
-            self.node.coordinator_ip = request.coordinator_ip
-            self.node._set_state(NodeState.FOLLOWER)
-            print(f"[{self.node.host_ip}] Received cluster topology! Coordinator is {self.node.coordinator_ip}")
-            # Wake up the main thread waiting in join_cluster()
-            self.node._election_cv.notify_all()
-            
-        return cluster_service_pb2.TopologyResponse(ok=True, available_memory_bytes=capacity)
 
     def BroadcastPartitioning(self, request, context):
         with self.node._election_cv:
