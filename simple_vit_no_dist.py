@@ -19,9 +19,12 @@ def set_deterministic_seed(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
 class PureTransformer(nn.Module):
-    def _init_(self, num_layers=12, d_model=768, nhead=12):
-        super()._init_()
+    def __init__(self, num_layers=12, d_model=768, nhead=12):
+        super().__init__()
         
         self.layers = nn.ModuleList()
         
@@ -55,12 +58,15 @@ def main():
     train_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=len(train_dataset), shuffle=True)
     full_images, full_labels = next(iter(train_loader))
+    full_images = full_images.to(device)
+    full_labels = full_labels.to(device)
 
-    model = PureTransformer(num_layers=4, d_model=768)
+    model = PureTransformer(num_layers=20, d_model=768).to(device)
     criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
     epochs = 5
-    batch_size = 64
+    batch_size = 512
 
     for epoch in range(epochs):
         print(f"\n--- Epoch {epoch + 1}/{epochs} ---")
@@ -78,7 +84,12 @@ def main():
 
             out = model(x)
             loss = criterion(out, y)
-            epoch_loss += loss
+            
+            optimizer.zero_grad()   # clear old gradients
+            loss.backward()         # compute gradients
+            optimizer.step()        # update weights
+
+            epoch_loss += loss.item()
 
             if (i // batch_size) % 20 == 0:
                 print(f"  Batch {(i // batch_size) + 1}/{(len(full_images)//batch_size)} | Loss: {loss:.4f}")
@@ -87,5 +98,5 @@ def main():
         avg_loss = epoch_loss / (len(full_images) // batch_size)
         print(f"Epoch {epoch + 1} Avg Loss: {avg_loss:.4f} | Time: {end_time - start_time:.2f}s")
 
-if __name__ == '_main_':
+if __name__ == '__main__':
     main()

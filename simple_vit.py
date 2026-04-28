@@ -8,6 +8,9 @@ import numpy as np
 import random
 from pipeline import DistributedPipeline
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
 def set_deterministic_seed(seed=42):
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -20,8 +23,8 @@ def set_deterministic_seed(seed=42):
     torch.backends.cudnn.benchmark = False
 
 class PureTransformer(nn.Module):
-    def _init_(self, num_layers=12, d_model=768, nhead=12):
-        super()._init_()
+    def __init__(self, num_layers=12, d_model=768, nhead=12):
+        super().__init__()
         
         self.layers = nn.ModuleList()
         
@@ -64,8 +67,10 @@ def main():
     train_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=len(train_dataset), shuffle=True)
     full_images, full_labels = next(iter(train_loader))
+    full_images = full_images.to(device)
+    full_labels = full_labels.to(device)
 
-    model_builder = lambda: PureTransformer(num_layers=4, d_model=768)
+    model_builder = lambda: PureTransformer(num_layers=20, d_model=768)
     criterion = nn.CrossEntropyLoss()
 
     print(f"Initializing GradSync Pipeline. Waiting on peers...")
@@ -80,8 +85,13 @@ def main():
         config_path=args.config
     )
 
+    if pipeline.role == 'head':
+        print("Allowing cluster to stabilize and Tail node to boot server...")
+        time.sleep(3)
+
+
     epochs = 5
-    batch_size = 64
+    batch_size = 256
 
     for epoch in range(epochs):
         print(f"\n--- Epoch {epoch + 1}/{epochs} ---")
@@ -91,6 +101,7 @@ def main():
         indices = torch.randperm(len(full_images))
         
         for i in range(0, len(indices), batch_size):
+            temp_start = time.time()
             batch_idx = indices[i:i+batch_size]
             if len(batch_idx) < batch_size: continue
             
@@ -100,12 +111,12 @@ def main():
             loss = pipeline.execute_batch(x, y)
             epoch_loss += loss
 
-            if (i // batch_size) % 20 == 0:
-                print(f"  Batch {(i // batch_size) + 1}/{(len(full_images)//batch_size)} | Loss: {loss:.4f}")
+            if (i // batch_size) % 1 == 0:
+                print(f"  Batch {(i // batch_size) + 1}/{(len(full_images)//batch_size)} | Loss: {loss:.4f} | time {time.time() - temp_start}")
         
         end_time = time.time()
         avg_loss = epoch_loss / (len(full_images) // batch_size)
         print(f"Epoch {epoch + 1} Avg Loss: {avg_loss:.4f} | Time: {end_time - start_time:.2f}s")
 
-if __name__ == '_main_':
+if __name__ == '__main__':
     main()

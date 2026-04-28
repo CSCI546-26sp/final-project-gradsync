@@ -33,9 +33,16 @@ class PipelineServer(tensor_service_pb2_grpc.PipelineRouterServicer):
 
         # 2. Hand off pure bytes to the ML application logic in the pipeline package
         try:
-            grad_bytes, grad_shape, loss_val = await self.processing_callback(
-                act_bytes, act_shape, tgt_bytes, tgt_shape
-            )
+            if asyncio.iscoroutinefunction(self.processing_callback):
+                # Middle Node (Needs await because it does network calls)
+                grad_bytes, grad_shape, loss_val = await self.processing_callback(
+                    act_bytes, act_shape, tgt_bytes, tgt_shape
+                )
+            else:
+                # Tail Node (Pure math. Ship it to a background thread!)
+                grad_bytes, grad_shape, loss_val = await asyncio.to_thread(
+                    self.processing_callback, act_bytes, act_shape, tgt_bytes, tgt_shape
+                )
         except Exception as e:
             # If the PyTorch callback crashes (e.g., OOM error), tell the client
             context.set_code(grpc.StatusCode.INTERNAL)
@@ -62,12 +69,15 @@ async def serve_pipeline_async(processing_callback, port=12345):
         PipelineServer(processing_callback), server
     )
 
-    server.add_insecure_port(f'[::]:{port}')
-    print(f"Pipeline Server listening on port {port}...")
+    # server.add_insecure_port(f'[::]:{port}')
+     # Force explicit IPv4 binding to match the client's 127.0.0.1 request
+    server.add_insecure_port(f'0.0.0.0:{port}')
     await server.start()
     await server.wait_for_termination()
 
 
 def serve_pipeline(processing_callback, port=12345):
-    """Starts the blocking gRPC server."""
-    asyncio.run(serve_pipeline_async(processing_callback, port))
+    """Starts the blocking gRPC server using the existing Event Loop."""
+    # DO NOT use asyncio.run(). It destroys the universe.
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(serve_pipeline_async(processing_callback, port))
