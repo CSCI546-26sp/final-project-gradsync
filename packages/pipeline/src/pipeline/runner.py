@@ -46,6 +46,9 @@ class TailNodeRunner:
         activations.requires_grad_(True)
         
         targets = unpack_tensor(tgt_bytes, tgt_shape, self.device)
+        
+        if isinstance(self.criterion, (nn.CrossEntropyLoss, nn.NLLLoss)):
+            targets = targets.long()
 
         # ...
         t0 = time.perf_counter()
