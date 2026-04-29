@@ -2,7 +2,6 @@
 __pycache__/
 *.py[cod]
 *$py.class
-cluster.json
 
 # C extensions
 *.so
@@ -237,6 +236,3 @@ CLAUDE.md
 
 # Proto compilation script
 compile_proto.sh
-
-# Cluster configuration
-cluster.json
