@@ -94,7 +94,7 @@ class HeadNodeRunner:
 
         # --- INITIALIZE TELEMETRY CLIENT ---
         self.node_id = node_id
-        clean_ip = "0.0.0.0"
+        clean_ip = "127.0.0.1"
         print(f"HeadNodeRunner initializing telemetry client targeting {clean_ip}:8081 with node_id {node_id}")
         self.telemetry = TelemetryClient(target_ip=clean_ip, port=8081, node_id=node_id)
 
