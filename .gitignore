@@ -2,17 +2,9 @@
 __pycache__/
 *.py[cod]
 *$py.class
-cluster.json
 
 # C extensions
 *.so
-
-# gRPC generated stubs (compile locally using compile_proto.sh)
-*_pb2.py
-*_pb2_grpc.py
-
-compile_proto.sh
-
 
 # Distribution / packaging
 .Python
@@ -234,9 +226,3 @@ CLAUDE.md
 # gRPC generated stubs (compile locally using compile_proto.sh)
 *_pb2.py
 *_pb2_grpc.py
-
-# Proto compilation script
-compile_proto.sh
-
-# Cluster configuration
-cluster.json

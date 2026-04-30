@@ -1,13 +1,15 @@
 [project]
 name = "telemetry"
 version = "0.1.0"
-description = "Add your description here"
+description = "GradSync Telemetry Module"
 readme = "README.md"
-authors = [
-    { name = "Bhaskar Mahajan", email = "bhaskarmahajan98@gmail.com" }
-]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "websockets",
+    "torch==2.7.1",
+]
 
 [build-system]
 requires = ["uv_build>=0.9.1,<0.10.0"]

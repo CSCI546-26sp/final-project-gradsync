@@ -166,7 +166,7 @@ class TestSendRequestVote:
 class TestBroadcastTopology:
     def test_sets_own_topology_config(self, three_node):
         with patch("orchestrator.node.ClusterClient") as MockClient:
-            MockClient.return_value.broadcast_topology.return_value = True
+            MockClient.return_value.broadcast_topology.return_value = (True, 8 * 1024 ** 3)
             three_node.broadcast_topology()
 
         assert three_node.topology_config is not None
@@ -174,21 +174,21 @@ class TestBroadcastTopology:
     def test_sets_own_coordinator_ip_to_self(self, three_node):
         """The leader sets itself as coordinator_ip before sending to peers."""
         with patch("orchestrator.node.ClusterClient") as MockClient:
-            MockClient.return_value.broadcast_topology.return_value = True
+            MockClient.return_value.broadcast_topology.return_value = (True, 8 * 1024 ** 3)
             three_node.broadcast_topology()
 
         assert three_node.coordinator_ip == "10.0.0.1:50051"
 
     def test_topology_config_coordinator_ip(self, three_node):
         with patch("orchestrator.node.ClusterClient") as MockClient:
-            MockClient.return_value.broadcast_topology.return_value = True
+            MockClient.return_value.broadcast_topology.return_value = (True, 8 * 1024 ** 3)
             three_node.broadcast_topology()
 
         assert three_node.topology_config.coordinator_ip == "10.0.0.1:50051"
 
     def test_ordered_ips_includes_all_nodes(self, three_node):
         with patch("orchestrator.node.ClusterClient") as MockClient:
-            MockClient.return_value.broadcast_topology.return_value = True
+            MockClient.return_value.broadcast_topology.return_value = (True, 8 * 1024 ** 3)
             three_node.broadcast_topology()
 
         ordered = list(three_node.topology_config.ordered_node_ips)
@@ -198,7 +198,7 @@ class TestBroadcastTopology:
     def test_leader_is_first_in_ordered_ips(self, three_node):
         """Leader's own IP must be placed at index 0 of the ordered list."""
         with patch("orchestrator.node.ClusterClient") as MockClient:
-            MockClient.return_value.broadcast_topology.return_value = True
+            MockClient.return_value.broadcast_topology.return_value = (True, 8 * 1024 ** 3)
             three_node.broadcast_topology()
 
         ordered = list(three_node.topology_config.ordered_node_ips)
@@ -207,7 +207,7 @@ class TestBroadcastTopology:
     def test_sends_to_every_peer(self, three_node):
         """One ClusterClient must be instantiated (and closed) per peer."""
         with patch("orchestrator.node.ClusterClient") as MockClient:
-            MockClient.return_value.broadcast_topology.return_value = True
+            MockClient.return_value.broadcast_topology.return_value = (True, 8 * 1024 ** 3)
             three_node.broadcast_topology()
 
         assert MockClient.call_count == len(three_node.peer_ips)  # 2
@@ -215,11 +215,21 @@ class TestBroadcastTopology:
     def test_peer_ips_used_as_targets(self, three_node):
         """Each peer IP must appear exactly once in the ClusterClient call args."""
         with patch("orchestrator.node.ClusterClient") as MockClient:
-            MockClient.return_value.broadcast_topology.return_value = True
+            MockClient.return_value.broadcast_topology.return_value = (True, 8 * 1024 ** 3)
             three_node.broadcast_topology()
 
         called_ips = {c.kwargs.get("target_ip") or c.args[0] for c in MockClient.call_args_list}
         assert called_ips == {"10.0.0.2:50051", "10.0.0.3:50051"}
+
+    def test_peer_capacities_populated_on_success(self, three_node):
+        """Capacities returned by peers must be stored in peer_capacities."""
+        with patch("orchestrator.node.ClusterClient") as MockClient:
+            MockClient.return_value.broadcast_topology.return_value = (True, 4 * 1024 ** 3)
+            three_node.broadcast_topology()
+
+        for peer in three_node.peer_ips:
+            assert peer in three_node.peer_capacities
+            assert three_node.peer_capacities[peer] == 4 * 1024 ** 3
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +263,8 @@ class TestCreateTopologyConfig:
         assert topo.prev_node_idx == 2
         assert topo.next_node_idx == 4
 
-    def test_missing_element_fallback(self):
+    def test_missing_element_raises_value_error(self):
+        """An IP not in ordered_ips must raise ValueError from list.index()."""
         ordered_ips = ["10.0.0.1:50051", "10.0.0.2:50051", "10.0.0.3:50051", "10.0.0.4:50051"]
         with pytest.raises(ValueError):
             ClusterNode._create_topology_config("10.0.0.9:50051", "10.0.0.1:50051", ordered_ips, 1)

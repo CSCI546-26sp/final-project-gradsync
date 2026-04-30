@@ -1,19 +1,14 @@
+import inspect
 import random
 import threading
 import time
-from enum import Enum, auto
 import grpc
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from .states import NodeState
 from .client import ClusterClient
 from .server import ClusterServer
 from .proto import cluster_service_pb2, cluster_service_pb2_grpc
-
-
-class NodeState(Enum):
-    FOLLOWER  = auto()
-    CANDIDATE = auto()
-    LEADER    = auto()
 
 
 class ClusterNode:
@@ -22,14 +17,33 @@ class ClusterNode:
         self.host_ip = host_ip if ":" in host_ip else f"{host_ip}:{port}"
         self.peer_ips = [p if ":" in p else f"{p}:{port}" for p in peer_ips]
         self.port = port
+        self.peer_capacities = {}
         self.state = NodeState.FOLLOWER
         self.current_term = 0
         self.voted_for = None    # candidate_ip this node voted for in current term
         self.votes_received = 0
         self.coordinator_ip = None
         self.topology_config = None
+        self.partition_config = None
         self.server = None
         self._election_cv = threading.Condition()  # used to sleep until timeout (or future heartbeat)
+
+    # ------------------------------------------------------------------
+    # State-transition helper
+    # ------------------------------------------------------------------
+    def _set_state(self, new_state: "NodeState") -> None:
+        """Set node state and emit a structured log line with the call-site location.
+
+        The log format is:
+            [{host_ip}] STATE {OLD} -> {NEW}  ({file}:{line})
+        """
+        old_state = self.state
+        if old_state == new_state:
+            return  # no-op – skip noise for unchanged transitions
+        self.state = new_state
+        frame = inspect.stack()[1]  # one level up = the actual call site
+        location = f"{frame.filename}:{frame.lineno}"
+        print(f"[{self.host_ip}] STATE {old_state.name} -> {new_state.name}  ({location})")
 
     def _serve_cluster(self):
         """Starts the background gRPC server for the Raft node."""
@@ -37,7 +51,9 @@ class ClusterNode:
         cluster_service_pb2_grpc.add_ClusterCoordinatorServicer_to_server(
             ClusterServer(self), server
         )
-        bound_port = server.add_insecure_port(self.host_ip)
+        bind_ip = f"0.0.0.0:{self.host_ip.split(":")[-1]}"
+        print(f"Starting Orchestrator on {bind_ip}")
+        bound_port = server.add_insecure_port(bind_ip)
         if bound_port == 0:
             raise RuntimeError(f"Failed to bind to {self.host_ip}. The port is likely already in use by another process.")
             
@@ -63,6 +79,9 @@ class ClusterNode:
 
             with self._election_cv:
                 notified = self._election_cv.wait(timeout=election_timeout)
+
+                if self.topology_config is not None:
+                    break
                 
                 if notified or self.state == NodeState.LEADER:
                     # Woken up by incoming BroadcastTopology (which sets topology_config),
@@ -70,7 +89,7 @@ class ClusterNode:
                     continue
 
                 # Timeout fired. Transition to CANDIDATE and start election
-                self.state = NodeState.CANDIDATE
+                self._set_state(NodeState.CANDIDATE)
                 self.current_term += 1
                 print(f"[{self.host_ip}] Election timeout fired (term={self.current_term}). Becoming CANDIDATE.")
 
@@ -82,18 +101,27 @@ class ClusterNode:
 
                 # Immediately check if majority is met (handles 1-node cluster zero-peer case)
                 total_nodes = len(self.peer_ips) + 1
+                print(f"[{self.host_ip}] Total nodes: {total_nodes}, Votes received: {self.votes_received}")
+                is_leader_now = False
                 if self.votes_received > total_nodes // 2:
-                    self.state = NodeState.LEADER
+                    self._set_state(NodeState.LEADER)
                     print(f"[{self.host_ip}] Elected LEADER for term {self.current_term}!")
+                    # Set topology immediately under the lock so the outer while-loop
+                    # cannot fire another election timeout before we broadcast.
+                    ordered_ips = [self.host_ip] + self.peer_ips
+                    self.topology_config = self._create_topology_config(
+                        self.host_ip, self.host_ip, ordered_ips, self.current_term
+                    )
+                    self.coordinator_ip = self.host_ip
+                    self._election_cv.notify_all()
+                    is_leader_now = True
 
             # --- LOCK RELEASED ---
-            
-            if self.state == NodeState.LEADER:
+
+            if is_leader_now:
                 self.broadcast_topology()
                 continue
 
-            # Do not hold the lock while making blocking network calls.
-            
             if self.state != NodeState.CANDIDATE:
                 continue
             print(f"[{self.host_ip}] Requesting votes from peers: {self.peer_ips}")
@@ -121,8 +149,16 @@ class ClusterNode:
                                 # Check majority (N/2 + 1 where N = self + peers)
                                 total_nodes = len(self.peer_ips) + 1
                                 if self.votes_received > total_nodes // 2:
-                                    self.state = NodeState.LEADER
+                                    self._set_state(NodeState.LEADER)
                                     print(f"[{self.host_ip}] Elected LEADER for term {self.current_term}!")
+                                    # Set topology immediately under the lock so the outer while-loop
+                                    # cannot fire another election timeout before we broadcast.
+                                    ordered_ips = [self.host_ip] + self.peer_ips
+                                    self.topology_config = self._create_topology_config(
+                                        self.host_ip, self.host_ip, ordered_ips, self.current_term
+                                    )
+                                    self.coordinator_ip = self.host_ip
+                                    self._election_cv.notify_all()
                                     is_leader_now = True
                             
                             if is_leader_now:
@@ -133,7 +169,14 @@ class ClusterNode:
                         peer_ip = futures[future]
                         print(f"[{self.host_ip}] Failed to get vote from {peer_ip}. Re-trying next cycle.")
         
-        return self.topology_config
+        return self.topology_config, self.peer_capacities
+
+    def wait_for_partitioning(self):
+        """Blocks until the Leader sends the layer partition boundaries."""
+        with self._election_cv:
+            while self.partition_config is None:
+                self._election_cv.wait()
+        return self.partition_config
 
     def shutdown(self):
         """Cleanly stop the gRPC server."""
@@ -177,7 +220,7 @@ class ClusterNode:
             with self._election_cv:
                 if responder_term > self.current_term:
                     self.current_term = responder_term
-                    self.state = NodeState.FOLLOWER
+                    self._set_state(NodeState.FOLLOWER)
                     self.voted_for = None
                     print(f"[{self.host_ip}] Peer {peer_ip} has higher term {responder_term}. Stepping down to FOLLOWER.")
 
@@ -186,45 +229,35 @@ class ClusterNode:
             client.close()
 
     def broadcast_topology(self):
-        """Called by the newly elected LEADER to tell all peers the final assignments."""
+        """Called by the newly elected LEADER to tell all peers the final assignments.
+
+        topology_config is already set on the leader by join_cluster() under the lock
+        before this method is called. This method only fans out to ALL peers and
+        waits for every acknowledgment, since every node must have the topology for
+        the cluster to be usable.
+        """
         ordered_ips = [self.host_ip] + self.peer_ips
-        successes = 1  # We implicitly accept our own topology
-        total_nodes = len(self.peer_ips) + 1
 
-        def check_majority():
-            # Eagerly lock our topology under mutex to prevent race conditions
-            with self._election_cv:
-                if successes > total_nodes // 2 and self.topology_config is None:
-                    topology = self._create_topology_config(self.host_ip, self.host_ip, ordered_ips, self.current_term)
-                    self.topology_config = topology
-                    self.coordinator_ip = self.host_ip
-                    self._election_cv.notify_all()
-
-        # Check immediately for single-node clusters before engaging executor
-        check_majority()
-
-        # Broadcast to all peers concurrently
+        # --- Broadcast to ALL peers concurrently and wait for every ack ---
         with ThreadPoolExecutor(max_workers=max(1, len(self.peer_ips))) as executor:
-            futures = [
-                executor.submit(self.send_topology, peer, self.host_ip, ordered_ips, self.current_term)
+            futures = {
+                executor.submit(self.send_topology, peer, self.host_ip, ordered_ips, self.current_term): peer
                 for peer in self.peer_ips
-            ]
-            
+            }
+
             for future in as_completed(futures):
+                peer = futures[future]
                 try:
-                    if future.result():
-                        successes += 1
-                        check_majority()
+                    ok, capacity = future.result()
+                    if ok:
+                        self.peer_capacities[peer] = capacity
+                        print(f"[{self.host_ip}] Topology ack received from {peer}.")
+                    else:
+                        print(f"[{self.host_ip}] Peer {peer} rejected topology broadcast.")
                 except Exception as e:
-                    pass
+                    print(f"[{self.host_ip}] Failed to send topology to {peer}: {e}")
 
-        # If the executor finishes and we STILL haven't reached majority, we failed.
-        with self._election_cv:
-            if self.topology_config is None:
-                self.state = NodeState.FOLLOWER
-                self.voted_for = None
-
-    def send_topology(self, peer_ip: str, coordinator_ip: str, ordered_ips: list[str], term: int) -> bool:
+    def send_topology(self, peer_ip: str, coordinator_ip: str, ordered_ips: list[str], term: int) -> tuple[bool, int]:
         """Sends BroadcastTopology to peer_ip."""
         client = ClusterClient(target_ip=peer_ip, port=self.port)
         try:
@@ -251,3 +284,33 @@ class ClusterNode:
             prev_node_idx=prev_idx,
             next_node_idx=next_idx
         )
+
+    def broadcast_partitioning(self, allocations: dict):
+        """Called by LEADER to send specific layer boundaries to each node."""
+        if self.state != NodeState.LEADER:
+            return
+            
+        with self._election_cv:
+            # Set our own config
+            my_alloc = allocations.get(self.host_ip)
+            if my_alloc:
+                self.partition_config = cluster_service_pb2.PartitionConfig(
+                    start_layer_idx=my_alloc['start'],
+                    end_layer_idx=my_alloc['end']
+                )
+
+        with ThreadPoolExecutor(max_workers=max(1, len(self.peer_ips))) as executor:
+            for peer in self.peer_ips:
+                if peer in allocations:
+                    executor.submit(self.send_partitioning, peer, allocations[peer])
+
+    def send_partitioning(self, peer_ip: str, alloc: dict) -> bool:
+        client = ClusterClient(target_ip=peer_ip, port=self.port)
+        try:
+            config = cluster_service_pb2.PartitionConfig(
+                start_layer_idx=alloc['start'],
+                end_layer_idx=alloc['end']
+            )
+            return client.broadcast_partitioning(config)
+        finally:
+            client.close()

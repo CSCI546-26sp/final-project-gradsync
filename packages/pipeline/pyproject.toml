@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "comms",
+    "common",
     "numpy>=2.4.3",
     "torch==2.7.1",
     "torchaudio==2.7.1",
@@ -21,6 +22,7 @@ build-backend = "uv_build"
 
 [tool.uv.sources]
 comms = { workspace = true }
+common = { workspace = true }
 
 [[tool.uv.index]]
 url = "https://pypi.org/simple"

@@ -7,13 +7,26 @@ service ClusterCoordinator {
   rpc RequestVote (VoteRequest) returns (VoteResponse);
 
   // Elected coordinator broadcasts final role assignments to all peers
-  rpc BroadcastTopology (TopologyConfig) returns (Ack);
+  rpc BroadcastTopology (TopologyConfig) returns (TopologyResponse);
+
+  // Send calculated pipeline layer boundaries to each node
+  rpc BroadcastPartitioning (PartitionConfig) returns (Ack);
 
   // Synchronization barrier to verify all hosts are online before election
   rpc Ping (PingRequest) returns (Ack);
 }
 
 message PingRequest {}
+
+message TopologyResponse {
+  bool ok = 1;
+  int64 available_memory_bytes = 2;
+}
+
+message PartitionConfig {
+  int32 start_layer_idx = 1;
+  int32 end_layer_idx = 2;
+}
 
 message VoteRequest {
   int64  term         = 1;  // candidate's current election term

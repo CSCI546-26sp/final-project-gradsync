@@ -2,6 +2,18 @@ import grpc
 from .proto import tensor_service_pb2
 from .proto import tensor_service_pb2_grpc
 
+import asyncio
+ 
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    # Added [Thread: %(threadName)s] to the format
+    format='%(asctime)s | %(levelname)-8s | %(name)s | [Thread: %(threadName)s] | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
 
 class PipelineClient:
     def __init__(self, target_ip="localhost", port=12345):
@@ -17,10 +29,17 @@ class PipelineClient:
         self.stub = None
 
     def _connect(self):
-        # Establish the connection to the next node in the sequence
-        self.channel = grpc.aio.insecure_channel(
-            self.target, options=self.options)
-        self.stub = tensor_service_pb2_grpc.PipelineRouterStub(self.channel)
+        current_loop = asyncio.get_running_loop()
+        if getattr(self, 'channel', None) is None or getattr(self, '_loop', None) != current_loop:
+            # Stripped out Keepalives! The background threads fixed the need for them.
+            options = [
+                ('grpc.max_send_message_length', 100 * 1024 * 1024),
+                ('grpc.max_receive_message_length', 100 * 1024 * 1024)
+            ]
+            
+            self.channel = grpc.aio.insecure_channel(self.target, options=options)
+            self.stub = tensor_service_pb2_grpc.PipelineRouterStub(self.channel)
+            self._loop = current_loop
 
 
 
@@ -53,7 +72,8 @@ class PipelineClient:
         request_proto_bytes = len(request.SerializeToString())
 
         # print(f"request_tensor_bytes: {request_tensor_bytes}")
-        print(f"request_proto_bytes: {request_proto_bytes}")
+        # print(f"request_proto_bytes: {request_proto_bytes}")
+        logger.info(f"request_proto_bytes: {request_proto_bytes}")
 
         try:
             response = await self.stub.ExecutePipelineStage(request)
@@ -62,7 +82,8 @@ class PipelineClient:
             response_proto_bytes = len(response.SerializeToString())
             response_tensor_bytes = len(response.gradient_bytes)
 
-            print(f"response_proto_bytes: {response_proto_bytes}")
+            # print(f"response_proto_bytes: {response_proto_bytes}")
+            # logger.info(f"response_proto_bytes: {response_proto_bytes}")
             # print(f"response_tensor_bytes: {response_tensor_bytes}")
 
             return response.gradient_bytes, list(response.gradient_shape), response.loss_value

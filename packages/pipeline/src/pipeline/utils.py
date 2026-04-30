@@ -3,27 +3,92 @@ Utilities for device detection and configuration in distributed pipeline trainin
 """
 
 import torch
+import struct
 
 
-WIRE_DTYPE = torch.int8  # wire format only; in-memory model stays fp32
+import numpy as np
+import logging
+
+# Import from your new compression lab
+from compression_lab import (
+    TensorCompressor, 
+    CompressionType, 
+    get_optimal_compression
+)
+
+logging.basicConfig(
+    level=logging.INFO,
+    # Added [Thread: %(threadName)s] to the format
+    format='%(asctime)s | %(levelname)-8s | %(name)s | [Thread: %(threadName)s] | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+# --- MASTER OVERRIDE SWITCH ---
+# Set to None to use the intelligent dynamic router.
+# Set to CompressionType.NONE to completely disable compression (Raw FP32).
+FORCE_COMPRESSION = None
+# ------------------------------
+
+COMP_TO_ID = {
+    CompressionType.NONE: 0,
+    CompressionType.FP16: 1,
+    CompressionType.INT8: 2,
+    CompressionType.BINARY: 3,
+    CompressionType.SPARSE: 4,
+    CompressionType.OUTLIER_INT8: 5,
+    CompressionType.OUTLIER_INT4: 6
+}
+ID_TO_COMP = {v: k for k, v in COMP_TO_ID.items()}
 
 
 def pack_tensor(t: torch.Tensor):
     """
-    Convert a tensor to wire bytes using lower precision.
-    Returns: (bytes, shape)
+    Compresses a tensor and prepends a 1-byte routing header.
+    Supports dynamic routing or forced overrides.
     """
-    t_wire = t.detach().to(dtype=WIRE_DTYPE).cpu().contiguous()
-    return t_wire.numpy().tobytes(), list(t_wire.shape)
+    shape = list(t.shape)
+
+    # 1. Determine Compression Strategy
+    if FORCE_COMPRESSION is not None:
+        active_compression = FORCE_COMPRESSION
+    else:
+        active_compression = get_optimal_compression(t)
+        # logger.info(f"Active compression: {active_compression.name}")
+    # 2. Convert PyTorch tensor to raw FP32 bytes (This is the baseline)
+    tensor_bytes = t.detach().cpu().float().numpy().tobytes()
+
+    # 3. Compress (If CompressionType.NONE, this just returns tensor_bytes instantly)
+    compressor = TensorCompressor()
+    compressed_bytes = compressor.compress(tensor_bytes, compression_type=active_compression)
+    
+    # 4. Prepend the 1-byte header
+    comp_id = COMP_TO_ID[active_compression]
+    payload_with_header = struct.pack('!B', comp_id) + compressed_bytes    
+
+    return payload_with_header, shape
 
 
 def unpack_tensor(payload: bytes, shape, device):
     """
-    Convert wire bytes back to fp32 tensor for local PyTorch use.
+    Reads the 1-byte header, routes to the correct decompressor, and restores the tensor.
     """
-    t_wire = torch.frombuffer(
-        bytearray(payload), dtype=WIRE_DTYPE).reshape(shape).clone()
-    return t_wire.to(device=device, dtype=torch.float32)
+    # 1. Extract the 1-byte header
+    comp_id = struct.unpack('!B', payload[:1])[0]
+    active_compression = ID_TO_COMP[comp_id]
+
+    # 2. Strip the header
+    compressed_bytes = payload[1:]
+
+    # 3. Decompress (If CompressionType.NONE, this does nothing)
+    compressor = TensorCompressor()
+    decompressed_bytes = compressor.decompress(compressed_bytes, active_compression.value)
+
+    # 4. Convert raw FP32 bytes back to PyTorch tensor
+    t_np = np.frombuffer(decompressed_bytes, dtype=np.float32)
+    t_tensor = torch.frombuffer(t_np.copy(), dtype=torch.float32).reshape(shape)
+
+    return t_tensor.to(device)
 
 
 def detect_device() -> torch.device:
