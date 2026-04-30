@@ -224,3 +224,16 @@ Recreate the environment if dependencies become inconsistent:
 rm -rf .venv
 uv sync
 ```
+
+### Detected device=cpu (for machines with CUDA)
+
+After `uv sync` run : 
+
+```bash
+uv <pip install command for the preferrec torch version>
+```
+ex:
+```bash
+uv pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu126
+```
+
